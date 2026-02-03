@@ -185,6 +185,9 @@ pub enum Reply {
 }
 
 pub fn get_input(prompt: &str) -> String {
+    // let mut x: Vec<&[u8; 256]> = vec![];
+    // x.push(&[0; 256]);
+
     println!("{}", prompt);
     let mut input = String::new();
     io::stdin()
