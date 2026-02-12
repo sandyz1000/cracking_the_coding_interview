@@ -35,7 +35,7 @@ fn it_works() {
 
 use std::vec::Vec;
 use chrono::Utc;
-use rand::{thread_rng, Rng};
+use rand::{Rng, RngExt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Suit {
@@ -140,9 +140,9 @@ impl Shoe {
 
     fn shuffle(&mut self) {
         let card_count = self.cards.iter().map(|deck| deck.len()).sum();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for i in 0..card_count {
-            let j = rng.gen_range(i..card_count);
+            let j = rng.random_range(i..card_count);
             let (deck_i, card_i) = self.get_deck_and_card_index(i);
             let (deck_j, card_j) = self.get_deck_and_card_index(j);
             self.cards[deck_i][card_i] = std::mem::replace(&mut self.cards[deck_j][card_j], Default::default());

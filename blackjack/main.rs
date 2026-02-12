@@ -26,7 +26,7 @@
 use std::io;
 use std::{thread, time};
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::Rng;
 use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -103,7 +103,7 @@ impl Deck {
         }
     }
     pub fn shuffle(&mut self) {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         &self.cards.shuffle(&mut rng);
     }
 }

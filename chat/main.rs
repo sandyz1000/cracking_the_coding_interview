@@ -1,13 +1,10 @@
 #![recursion_limit = "1024"] // `error_chain!` can recurse deeply
 
-
 extern crate colored;
-#[macro_use]
-extern crate error_chain;
 #[macro_use]
 extern crate log;
 
-use clap::{Arg, ArgMatches};
+use clap::{Arg, Command};
 use colored::Colorize;
 use log::{Level, LevelFilter, Metadata, Record};
 use std::io::Read;
@@ -17,11 +14,20 @@ use std::net::TcpStream;
 use std::sync::mpsc;
 use std::thread;
 
-/// Allows us to use .chain_err(). See https://docs.rs/error-chain.
-mod errors {
-    error_chain! {}
+use std::error::Error;
+use std::fmt;
+
+/// Simple error type for this application
+#[derive(Debug)]
+pub struct AppError(String);
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
-use errors::*;
+
+impl Error for AppError {}
 
 /// This Writer struct holds the information on a writer-thread so that
 /// main_writer is able to send messages to all writers.
@@ -62,213 +68,206 @@ impl log::Log for OurLogger {
     fn flush(&self) {}
 }
 
-fn main() {
-    log::set_logger(&OurLogger).unwrap();
-    log::set_max_level(LevelFilter::Trace);
+fn run(args: clap::ArgMatches) -> Result<(), String> {
+    match args.subcommand() {
+        Some(("server", subarg)) => {
+            let port = subarg
+                .get_one::<String>("PORT")
+                .map(|s| s.as_str())
+                .unwrap();
+            let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+                .map_err(|_| format!("port '{}' already used", port.yellow()))?;
+            info!("listening started");
 
-    let args: ArgMatches = App::new("myprog")
-        .author("Me, me@mail.com")
-        .version("1.0.2")
-        .about("Explains in brief what the program does")
-        .arg(Arg::with_name("in_file").index(1))
-        .after_help(
-            "Longer explaination to appear after the options when 
-            displaying the help information from --help or -h",
-        )
-        .get_matches();
+            let (reader_send, to_main_writer) = mpsc::channel();
 
-    // let args: clap::ArgMatches = clap_app!(rustchat =>
-    //   (version: env!("CARGO_PKG_VERSION"))
-    //   (about: env!("CARGO_PKG_DESCRIPTION"))
-    //   (@subcommand client =>
-    //       (about: "run as client")
-    //       (@arg ADDRESS: +required "address to use")
-    //       (@arg PORT: +required "Port"))
-    //   (@subcommand server =>
-    //       (about: "run as server")
-    //       (@arg PORT: +required "Port"))
-    //   (@setting TrailingVarArg) (@setting GlobalVersion)
-    //   (@setting SubcommandRequiredElseHelp) (@setting DeriveDisplayOrder)
-    //   // (@arg debug: -d ... "Sets the level of debugging information")
-    // )
-    // .get_matches();
-
-    // This 'run' function is like 'main' except it allows us to return a
-    // Result type so that we can handle gracefully errors using chain_err.
-    let run = || -> Result<()> {
-        match args.subcommand() {
-            ("server", Some(subarg)) => {
-                let port = subarg.value_of("PORT").unwrap();
-                let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-                    .chain_err(|| format!("port '{}' aleady used", port.yellow()))?;
-                info!("listening started");
-
-                let (reader_send, to_main_writer) = mpsc::channel();
-
-                // The 'main_writer' is the one who takes input from one of
-                // incoming connections (from one of the readers) and send them
-                // along to the other connections (passing a message to all the
-                // writers).
-                let _main_writer = thread::spawn(move || -> Result<()> {
-                    let mut writers: Vec<Writer> = Vec::new();
-                    while let Some(act) = to_main_writer.recv().ok() {
-                        match act {
-                            Action::ToWriters(msg, from) => {
-                                writers.iter().filter(|to| **to != from).for_each(|to| {
-                                    debug!("ask writer n°{} to send '{}'", to.id, msg.yellow());
-                                    to.sender
-                                        .send(msg.clone()) // Idk why this clone is required
-                                        .unwrap_or_else(|_err| error!("cannot send to n°{}", to.id))
-                                })
-                            }
-                            Action::AddWriter(w) => writers.push(w),
-                            Action::RmWriter(w) => {
-                                writers.remove_item(&w);
-                            }
+            // The 'main_writer' is the one who takes input from one of
+            // incoming connections (from one of the readers) and send them
+            // along to the other connections (passing a message to all the
+            // writers).
+            let _main_writer = thread::spawn(move || -> Result<(), String> {
+                let mut writers: Vec<Writer> = Vec::new();
+                while let Some(act) = to_main_writer.recv().ok() {
+                    match act {
+                        Action::ToWriters(msg, from) => {
+                            writers.iter().filter(|to| **to != from).for_each(|to| {
+                                debug!("ask writer n°{} to send '{}'", to.id, msg.yellow());
+                                to.sender
+                                    .send(msg.clone()) // Idk why this clone is required
+                                    .unwrap_or_else(|_err| error!("cannot send to n°{}", to.id))
+                            })
+                        }
+                        Action::AddWriter(w) => writers.push(w),
+                        Action::RmWriter(w) => {
+                            writers.retain(|writer| writer != &w);
                         }
                     }
-                    Ok(())
-                });
-
-                for (id, stream) in listener.incoming().enumerate() {
-                    // Each reader thread must be able to send its received message
-                    // to the main_writer. As it is a all-to-one communication to the
-                    // main_chan, we can reuse the same sender.
-                    let reader_send = reader_send.clone();
-
-                    // On the contrary, sending a message from the main_writer to all
-                    // the writer threads is a one-to-all communication. As it is not
-                    // provided by the std lib, we will create one channel per writer.
-                    let (writer_send, writer_recv) = mpsc::channel();
-
-                    // Tell the main_writer that we got a new writer he should know of.
-                    reader_send
-                        .send(Action::AddWriter(Writer {
-                            sender: writer_send.clone(),
-                            id,
-                        }))
-                        .chain_err(|| {
-                            "couldn't add writer to the main writer (wtf this err msg?)"
-                        })?;
-
-                    info!("incoming connection n°{}", id);
-
-                    let mut writer: TcpStream = stream.unwrap();
-                    let reader: TcpStream = writer.try_clone().unwrap();
-
-                    // The writer for this incoming connection. He is responsible for
-                    // sending the messages given by main_writer to the connection.
-                    thread::spawn(move || -> Result<()> {
-                        writeln!(writer, "server: connected as n°{}", id).chain_err(|| "")?;
-                        loop {
-                            let msg = writer_recv.recv().chain_err(|| "writer errored")?;
-                            writeln!(writer, "{}", msg)
-                                .chain_err(|| format!("error writing to connection n°{}", id))?;
-                            debug!("writer n°{} emited '{}'", id, msg.yellow());
-                        }
-                    });
-
-                    // The reader for this incoming connection. He receives the messages
-                    // from the connection and passes them to the main_writer.
-                    thread::spawn(move || -> Result<()> {
-                        // Note: `Read::chars()` has been removed. See:
-                        // https://github.com/rust-lang/rust/issues/27802#issuecomment-377537778
-                        // I wanted a quick fix, so I used `::io::Read::read_to_string`
-                        // but it does allow replacing wrong utf-8 code points with the
-                        // replacement character (`�`). The good option would be to use
-                        // the utf8 crate and mimic the `reader.chars()` behaviour.
-                        //Replacement: reader.read_to_string(&mut buf);
-                        let reader_buf = BufReader::new(reader);
-                        for line in reader_buf.lines() {
-                            match line {
-                                Ok(l) => {
-                                    debug!("reader n°{} received '{}'", id, l.yellow());
-                                    let sender = writer_send.clone();
-                                    reader_send
-                                        .send(Action::ToWriters(l, Writer { sender, id }))
-                                        .chain_err(|| "")?;
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "reader n°{} received a line with a wrong utf8 seq '{}'",
-                                        id, e
-                                    );
-                                }
-                            }
-                        }
-                        Ok(())
-                    });
                 }
-            }
+                Ok(())
+            });
 
-            ("client", Some(subarg)) => {
-                let (address, port) = (
-                    subarg.value_of("ADDRESS").unwrap(),
-                    subarg.value_of("PORT").unwrap(),
-                );
-                let reader =
-                    TcpStream::connect(format!("{}:{}", address, port)).chain_err(|| {
-                        format!(
-                            "could not connect to {}:{}",
-                            address.yellow(),
-                            port.yellow()
-                        )
+            for (id, stream) in listener.incoming().enumerate() {
+                // Each reader thread must be able to send its received message
+                // to the main_writer. As it is a all-to-one communication to the
+                // main_chan, we can reuse the same sender.
+                let reader_send = reader_send.clone();
+
+                // On the contrary, sending a message from the main_writer to all
+                // the writer threads is a one-to-all communication. As it is not
+                // provided by the std lib, we will create one channel per writer.
+                let (writer_send, writer_recv) = mpsc::channel();
+
+                // Tell the main_writer that we got a new writer he should know of.
+                reader_send
+                    .send(Action::AddWriter(Writer {
+                        sender: writer_send.clone(),
+                        id,
+                    }))
+                    .map_err(|_| {
+                        "couldn't add writer to the main writer (wtf this err msg?)".to_string()
                     })?;
-                let mut writer = reader
-                    .try_clone()
-                    .chain_err(|| "impossibe to clone the TCP stream (i.e., the socket")?;
 
-                info!("you can start typing");
-                // The writer.
-                let thread_writer = thread::spawn(move || -> Result<()> {
-                    let stdin = std::io::stdin();
-                    for b in stdin.bytes() {
-                        let b = b.chain_err(|| "failed to read byte from stdin")?;
-                        writer
-                            .write(&[b])
-                            .chain_err(|| format!("failed to write byte '{}'", b as char))?;
+                info!("incoming connection n°{}", id);
+
+                let mut writer: TcpStream = stream.unwrap();
+                let reader: TcpStream = writer.try_clone().unwrap();
+
+                // The writer for this incoming connection. He is responsible for
+                // sending the messages given by main_writer to the connection.
+                thread::spawn(move || -> Result<(), String> {
+                    writeln!(writer, "server: connected as n°{}", id).map_err(|e| e.to_string())?;
+                    loop {
+                        let msg = writer_recv
+                            .recv()
+                            .map_err(|_| "writer errored".to_string())?;
+                        writeln!(writer, "{}", msg)
+                            .map_err(|e| format!("error writing to connection n°{}: {}", id, e))?;
+                        debug!("writer n°{} emited '{}'", id, msg.yellow());
                     }
-                    Ok(())
                 });
-                // The reader.
-                thread::spawn(move || -> Result<()> {
+
+                // The reader for this incoming connection. He receives the messages
+                // from the connection and passes them to the main_writer.
+                thread::spawn(move || -> Result<(), String> {
+                    // Note: `Read::chars()` has been removed. See:
+                    // https://github.com/rust-lang/rust/issues/27802#issuecomment-377537778
+                    // I wanted a quick fix, so I used `::io::Read::read_to_string`
+                    // but it does allow replacing wrong utf-8 code points with the
+                    // replacement character (`�`). The good option would be to use
+                    // the utf8 crate and mimic the `reader.chars()` behaviour.
+                    //Replacement: reader.read_to_string(&mut buf);
                     let reader_buf = BufReader::new(reader);
                     for line in reader_buf.lines() {
                         match line {
-                            Ok(l) => println!("{} {}", "remote:".blue().bold(), l),
+                            Ok(l) => {
+                                debug!("reader n°{} received '{}'", id, l.yellow());
+                                let sender = writer_send.clone();
+                                reader_send
+                                    .send(Action::ToWriters(l, Writer { sender, id }))
+                                    .map_err(|_| "".to_string())?;
+                            }
                             Err(e) => {
                                 error!(
-                                    "{} received a line with a wrong utf8 seq: '{}'",
-                                    "remote:".blue().bold(),
-                                    e
+                                    "reader n°{} received a line with a wrong utf8 seq '{}'",
+                                    id, e
                                 );
                             }
                         }
                     }
                     Ok(())
                 });
-                // We must wait for the writing thread to terminate; otherwise,
-                // the program will quit immediately.
-                thread_writer
-                    .join()
-                    .unwrap()
-                    .chain_err(|| "writing thread errored")?;
             }
-            _ => panic!("tell the dev: 'clap' should have ensured a subcommand is given"),
         }
-        Ok(())
-    };
+
+        Some(("client", subarg)) => {
+            let address = subarg
+                .get_one::<String>("ADDRESS")
+                .map(|s| s.as_str())
+                .unwrap();
+            let port = subarg
+                .get_one::<String>("PORT")
+                .map(|s| s.as_str())
+                .unwrap();
+            let reader = TcpStream::connect(format!("{}:{}", address, port)).map_err(|_| {
+                format!(
+                    "could not connect to {}:{}",
+                    address.yellow(),
+                    port.yellow()
+                )
+            })?;
+            let mut writer = reader
+                .try_clone()
+                .map_err(|_| "impossibe to clone the TCP stream (i.e., the socket)".to_string())?;
+
+            info!("you can start typing");
+            // The writer.
+            let thread_writer = thread::spawn(move || -> Result<(), String> {
+                let stdin = std::io::stdin();
+                for b in stdin.bytes() {
+                    let b = b.map_err(|e| e.to_string())?;
+                    writer
+                        .write(&[b])
+                        .map_err(|e| format!("failed to write byte: {}", e))?;
+                }
+                Ok(())
+            });
+            // The reader.
+            thread::spawn(move || -> Result<(), String> {
+                let reader_buf = BufReader::new(reader);
+                for line in reader_buf.lines() {
+                    match line {
+                        Ok(l) => println!("{} {}", "remote:".blue().bold(), l),
+                        Err(e) => {
+                            error!(
+                                "{} received a line with a wrong utf8 seq: '{}'",
+                                "remote:".blue().bold(),
+                                e
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            });
+            // We must wait for the writing thread to terminate; otherwise,
+            // the program will quit immediately.
+            thread_writer
+                .join()
+                .unwrap()
+                .map_err(|_| "writing thread errored".to_string())?;
+        }
+        _ => panic!("tell the dev: 'clap' should have ensured a subcommand is given"),
+    }
+    Ok(())
+}
+
+fn main() {
+    log::set_logger(&OurLogger).unwrap();
+    log::set_max_level(LevelFilter::Trace);
+
+    let args = Command::new("myprog")
+        .author("Me, me@mail.com")
+        .version("1.0.2")
+        .about("Explains in brief what the program does")
+        .subcommand(
+            Command::new("server")
+                .about("run as server")
+                .arg(Arg::new("PORT").required(true).help("Port to listen on")),
+        )
+        .subcommand(
+            Command::new("client")
+                .about("run as client")
+                .arg(Arg::new("ADDRESS").required(true).help("address to use"))
+                .arg(Arg::new("PORT").required(true).help("Port")),
+        )
+        .after_help(
+            "Longer explaination to appear after the options when 
+            displaying the help information from --help or -h",
+        )
+        .get_matches();
 
     // Run and handle errors.
-    if let Err(ref e) = run() {
+    if let Err(e) = run(args) {
         error!("{}", e);
-        for e in e.iter().skip(1) {
-            error!("{} {}", "caused by:".bright_black().bold(), e);
-        }
-        // Use `RUST_BACKTRACE=1` to enable the backtraces.
-        if let Some(backtrace) = e.backtrace() {
-            error!("{} {:?}", "backtrace:".blue().bold(), backtrace);
-        }
         std::process::exit(1);
     }
 }
