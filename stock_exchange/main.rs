@@ -81,7 +81,7 @@ struct OrderI {
     status: OrderStatus,
     time_enforcement: TimeEnforcementType,
     parts: Vec<Part>,
-    creation_time: DateTime<Utc>,
+    creation_time: DateTime<chrono::Utc>,
 }
 
 trait Order {
@@ -160,7 +160,7 @@ impl LimitOrder {
                 status: OrderStatus::Open,
                 time_enforcement,
                 parts: Vec::new(),
-                creation_time: Utc::now(),
+                creation_time: chrono::Utc::now(),
             },
             price_limit,
         }

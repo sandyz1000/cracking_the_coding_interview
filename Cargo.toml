@@ -1,44 +1,69 @@
-[package]
-name = "craking_coding_interview"
+[workspace]
+members = ["autocomplete-rs", "flight_management", "machine-coding-problems"]
 version = "0.1.0"
 authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
 edition = "2024"
 
-[dependencies]
+[package]
+name = "craking_coding_interview"
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
 crossbeam = "0.8.4"
-rayon = "1.11.0"
-rand = "0.10.0"
+rayon = "1.12.0"
+rand = "0.10.2"
 assert_approx_eq = "1.1.0"
 paste = "1.0.15"
 pretty_assertions = "1.4.1"
 threadpool = "1.8.1"
-bit-vec = "0.8.0"
+bit-vec = "0.10.1"
 num = "0.4.3"
-strum = "0.27.2"
-strum_macros = "0.27.2"
-chrono = "0.4.43"
-reqwest = { version = "0.13.2", features = ["json"] }
-clap = "4.5.58"
+thiserror = "2.0.19"
+strum = "0.28.0"
+strum_macros = "0.28.0"
+chrono = "0.4.45"
+reqwest = { version = "0.13.4", features = ["json"] }
+clap = "4.6.6"
+anyhow = "1.0.104"
 error-chain = "0.12.4"
 colored = "3.1.1"
-log = "0.4.29"
-libc = "0.2.169"
-futures = "0.3.31"
-arrayvec = "0.7.6"
+log = "0.4.33"
+libc = "0.2.189"
+futures = "0.3.33"
+arrayvec = "0.7.8"
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
-async-std = "1.13.2"
-tokio = { version = "1.49.0", features = ["full"] }
-pin-project = "1.1.10"
-tokio-stream = "0.1.18"
+async-std = "1.13.1"
+tokio = { version = "1.53.1", features = ["full"] }
+pin-project = "1.1.13"
+tokio-stream = "0.1.19"
+serde = "1.0.229"
 
-[dependencies.uuid]
-version = "1.20.0"
+
+[workspace.dependencies.uuid]
+version = "1.24.0"
 features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
     "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
 ]
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+uuid = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+colored = { workspace = true }
+log = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
 
 [[bin]]
 name = "atm"
@@ -100,7 +125,14 @@ path = "./crawler/spider.rs"
 name = "blockchain"
 path = "./async/task.rs"
 
-
 [[bin]]
 name = "stream"
 path = "./async/stream.rs"
+
+[[bin]]
+name = "concert_booking"
+path = "concert_booking/main.rs"
+
+[[bin]]
+name = "pub_sub"
+path = "pub_sub/main.rs"

@@ -34,8 +34,8 @@ fn it_works() {
 #![allow(unused)]
 
 use std::vec::Vec;
-use chrono::Utc;
 use rand::{Rng, RngExt};
+use chrono::Utc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Suit {

@@ -1,10 +1,10 @@
 #![allow(unused)]
 use std::{collections::HashMap, marker::PhantomData};
-use strum_macros::Display;
 use std::sync::Arc; 
 use std::sync::Mutex;
+use strum_macros::Display;
 
-#[derive(Debug, Clone, Copy, Display)]
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum VehicleType {
     Car,
     Truck,

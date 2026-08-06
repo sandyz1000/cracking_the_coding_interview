@@ -22,11 +22,10 @@
 //! and no two customers will be able to reserve the same seat.
 #![allow(unused)]
 
-use strum_macros::Display;
 use std::collections::HashMap;
-use chrono::prelude::*;
+use chrono::{TimeZone, Utc};
 
-#[derive(Debug, Display)]
+#[derive(Debug, strum_macros::Display)]
 enum BookingStatus {
     Requested,
     Pending,
@@ -37,7 +36,7 @@ enum BookingStatus {
 }
 
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, strum_macros::Display, Clone)]
 enum SeatType {
     Regular,
     Premium,
@@ -56,7 +55,7 @@ enum AccountStatus {
     Unknown,
 }
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, strum_macros::Display, Clone)]
 enum PaymentStatus {
     UNpaid,
     Pending,
@@ -128,9 +127,9 @@ struct Address {
 #[derive(Debug, Clone)]
 struct Show {
     show_id: u32,
-    created_on: chrono::DateTime<Utc>,
-    start_time: chrono::DateTime<Utc>,
-    end_time: chrono::DateTime<Utc>,
+    created_on: chrono::DateTime<chrono::Utc>,
+    start_time: chrono::DateTime<chrono::Utc>,
+    end_time: chrono::DateTime<chrono::Utc>,
     played_at: String,
     movie: Movie,
 }
@@ -141,7 +140,7 @@ struct Movie {
     description: String,
     duration_in_mins: u32,
     language: String,
-    release_date: chrono::DateTime<Utc>,
+    release_date: chrono::DateTime<chrono::Utc>,
     country: String,
     genre: String,
     movie_added_by: String,
@@ -154,7 +153,7 @@ impl Movie {
         description: String,
         duration_in_mins: u32,
         language: String,
-        release_date: chrono::DateTime<Utc>,
+        release_date: chrono::DateTime<chrono::Utc>,
         country: String,
         genre: String,
         movie_added_by: String,
@@ -379,7 +378,7 @@ impl Guest {
 struct Booking {
     booking_number: String,
     number_of_seats: i32,
-    created_on: chrono::DateTime<Utc>,
+    created_on: chrono::DateTime<chrono::Utc>,
     status: BookingStatus,
     show: Show,
     seats: Vec<ShowSeat>,
@@ -398,7 +397,7 @@ impl Booking {
         Self {
             booking_number,
             number_of_seats,
-            created_on: Utc::now(),
+            created_on: chrono::Utc::now(),
             status,
             show,
             seats: show_seats,
@@ -425,13 +424,13 @@ struct Coupon {
     id: i32,
     code: String,
     discount: f64,
-    expiry_date: chrono::DateTime<Utc>,
+    expiry_date: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone)]
 struct Payment {
     amount: f64,
-    created_on: chrono::DateTime<Utc>,
+    created_on: chrono::DateTime<chrono::Utc>,
     transaction_id: uuid::Uuid,
     payment_status: PaymentStatus,
 }
@@ -440,7 +439,7 @@ impl Payment {
     fn new(amount: f64, transaction_id: uuid::Uuid, payment_status: PaymentStatus) -> Self {
         Self {
             amount,
-            created_on: Utc::now(),
+            created_on: chrono::Utc::now(),
             transaction_id,
             payment_status,
         }
@@ -488,7 +487,7 @@ impl CashTransaction {
 #[derive(Debug, Clone)]
 struct Notification {
     notification_id: i32,
-    created_on: chrono::DateTime<Utc>,
+    created_on: chrono::DateTime<chrono::Utc>,
     content: String,
 }
 

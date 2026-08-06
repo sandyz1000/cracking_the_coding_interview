@@ -7,7 +7,7 @@ extern crate log;
 use clap::{Arg, Command};
 use colored::Colorize;
 use log::{Level, LevelFilter, Metadata, Record};
-use std::io::Read;
+use std::io::{BufWriter, Read};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;

@@ -1,9 +1,7 @@
 #![allow(unused)]
 
 use std::{fmt, collections::HashMap};
-use strum_macros::Display;
 use fmt::Display as FmtDisplay;
-use chrono::prelude::*;
 
 #[derive(Debug)]
 enum BookFormat {
@@ -360,7 +358,7 @@ struct CashTransaction {
 #[derive(Debug, Clone)]
 struct Notification {
     notification_id: i32,
-    created_on: chrono::DateTime<Utc>,
+    created_on: chrono::DateTime<chrono::Utc>,
     content: String
 }
 
@@ -514,7 +512,7 @@ trait Search {
     
     fn search_by_subject(&self, subject: &str) -> Option<&Vec<String>>;
     
-    fn search_by_pub_date(&self, publish_date: &NaiveDateTime) -> Option<&Vec<String>>;
+    fn search_by_pub_date(&self, publish_date: &chrono::NaiveDateTime) -> Option<&Vec<String>>;
 }
 
 struct Catalog {
@@ -556,7 +554,7 @@ impl Search for Catalog {
         self.book_subjects.get(subject)
     }
 
-    fn search_by_pub_date(&self, publish_date: &NaiveDateTime) -> Option<&Vec<String>> {
+    fn search_by_pub_date(&self, publish_date: &chrono::NaiveDateTime) -> Option<&Vec<String>> {
         unimplemented!()
     }
 }
