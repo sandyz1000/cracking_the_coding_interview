@@ -35,9 +35,8 @@ use std::collections::HashSet;
 // hash of the parent block (all zeros can be used in the genesis block),
 // a block number, and an opaque data blob for content.
 
-
-use std::pin::Pin;
 use std::marker::Unpin;
+use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
@@ -61,17 +60,14 @@ pub struct BlockStream<R: AsyncRead> {
     io: Pin<Box<R>>,
 }
 
-
 //******************************************************************************
 // Part 1.1: define a function to read a stream of blocks from a generic
 // asynchronous input source.
 //******************************************************************************
 
-
 pub fn read_blocks<R: AsyncRead>(io: R) -> BlockStream<R> {
     BlockStream { io: Box::pin(io) }
 }
-
 
 impl<R: AsyncRead> Stream for BlockStream<R> {
     type Item = Result<Block, io::Error>;
@@ -89,12 +85,10 @@ impl<R: AsyncRead> Stream for BlockStream<R> {
                 };
                 Poll::Ready(Some(Ok(block)))
             }
-            Poll::Ready(Ok(c)) => {
-                Poll::Ready(Some(Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Incomplete block data",
-                ))))
-            }
+            Poll::Ready(Ok(c)) => Poll::Ready(Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Incomplete block data",
+            )))),
             Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
         }
     }
@@ -113,7 +107,6 @@ impl<R: AsyncRead> Stream for BlockStream<R> {
 // It is allowed to use available libraries from e.g. crates.io for the
 // implementation, but BlockStream should not be an alias to a foreign type.
 
-
 /// Part 1.2: Given a list of streamed block chains, return the block that is
 /// the common ancestor if it exists, or None if there is no common ancestor
 /// to all of the chains.
@@ -122,7 +115,9 @@ impl<R: AsyncRead> Stream for BlockStream<R> {
 /// descendant-to-ancestor order, i.e. in each stream the block numbers decrease
 /// monotonically and a parent hash is identical to one computed
 /// from the blocks in the rest of the stream.
-pub async fn find_common_ancestor<R: AsyncRead>(blockchain_streams: &mut [BlockStream<R>]) -> Result<Option<Block>, io::Error> {
+pub async fn find_common_ancestor<R: AsyncRead>(
+    blockchain_streams: &mut [BlockStream<R>],
+) -> Result<Option<Block>, io::Error> {
     let mut recent_blocks: Vec<Option<Block>> = Vec::new();
 
     // Iterate through each stream and initialize the latest block.
@@ -144,7 +139,6 @@ pub async fn find_common_ancestor<R: AsyncRead>(blockchain_streams: &mut [BlockS
 
         match min_block {
             Some(min) => {
-                
                 let vec_blocks_min: Vec<&Block> = recent_blocks
                     .iter()
                     .filter_map(|block| block.as_ref().filter(|b| b.block_number == min))
@@ -154,7 +148,7 @@ pub async fn find_common_ancestor<R: AsyncRead>(blockchain_streams: &mut [BlockS
                 if vec_blocks_min.len() == 1 {
                     if let Some(ans) = vec_blocks_min.first().map(|b| (*b).clone()) {
                         return Ok(Some(ans));
-                    } 
+                    }
                 }
 
                 // If there are multiple blocks with the minimum block number, check parent hashes.
@@ -167,7 +161,7 @@ pub async fn find_common_ancestor<R: AsyncRead>(blockchain_streams: &mut [BlockS
                 if parent_hashes.iter().all(|&hash| hash == parent_hashes[0]) {
                     if let Some(ans) = vec_blocks_min.first().map(|b| (*b).clone()) {
                         return Ok(Some(ans));
-                    } 
+                    }
                 }
 
                 // Update the latest blocks with the next block from each stream.
@@ -204,11 +198,11 @@ mod tests {
         };
         block
     }
-    
+
     #[tokio::test]
     async fn test_read_blocks() {
         // let block = create_random_block();
-        let data = vec![0;56];
+        let data = vec![0; 56];
         let cursor = Cursor::new(data);
 
         let mut stream = read_blocks(cursor);
@@ -228,21 +222,27 @@ mod tests {
         chain3.reverse();
 
         let mut streams: Vec<BlockStream<Cursor<Vec<u8>>>> = vec![
-            BlockStream { io: Box::pin(Cursor::new(chain1)) },
-            BlockStream { io: Box::pin(Cursor::new(chain2)) },
-            BlockStream { io: Box::pin(Cursor::new(chain3)) },
+            BlockStream {
+                io: Box::pin(Cursor::new(chain1)),
+            },
+            BlockStream {
+                io: Box::pin(Cursor::new(chain2)),
+            },
+            BlockStream {
+                io: Box::pin(Cursor::new(chain3)),
+            },
         ];
 
         let common_ancestor = find_common_ancestor(&mut streams).await.unwrap();
-        assert_eq!(common_ancestor, Some(Block {
-            block_number: 3,
-            parent_hash: [0u8; 32],
-            content: vec![1, 2, 3].into_boxed_slice(),
-        }));
+        assert_eq!(
+            common_ancestor,
+            Some(Block {
+                block_number: 3,
+                parent_hash: [0u8; 32],
+                content: vec![1, 2, 3].into_boxed_slice(),
+            })
+        );
     }
-
 }
 
-fn main() {
-
-}
+fn main() {}

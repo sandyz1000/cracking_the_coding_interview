@@ -1,7 +1,7 @@
 #![allow(unused)]
-use std::{collections::HashMap, marker::PhantomData};
-use std::sync::Arc; 
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::{collections::HashMap, marker::PhantomData};
 use strum_macros::Display;
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
@@ -321,7 +321,6 @@ impl ExitPanel {
     }
 }
 
-
 #[derive(Debug, Clone)]
 struct ElectricPanel {
     pay_for_time: u32,
@@ -330,7 +329,10 @@ struct ElectricPanel {
 
 impl ElectricPanel {
     fn new(&self, pay_for_time: u32, charging_start_time: chrono::DateTime<chrono::Utc>) -> Self {
-        ElectricPanel { pay_for_time, charging_start_time }    
+        ElectricPanel {
+            pay_for_time,
+            charging_start_time,
+        }
     }
 
     fn cancel_charging(&self) -> bool {
@@ -830,8 +832,6 @@ impl<T: Vehicle> ParkingSpot<T> for ElectricSpot<T> {
     }
 }
 
-
-
 #[derive(Debug, Clone, Default)]
 struct ParkingRate {
     hour_number: u32,
@@ -840,7 +840,7 @@ struct ParkingRate {
 
 impl ParkingRate {
     fn new(hour_number: u32, rate: u32) -> Self {
-        ParkingRate {hour_number, rate}
+        ParkingRate { hour_number, rate }
     }
 }
 
@@ -865,9 +865,11 @@ struct ParkingLot<S, T> {
     lock: Arc<Mutex<()>>,
 }
 
-impl<S, T> ParkingLot<S, T> 
-where 
-    S: ParkingSpot<T>, T: Vehicle {
+impl<S, T> ParkingLot<S, T>
+where
+    S: ParkingSpot<T>,
+    T: Vehicle,
+{
     fn new(name: String, address: String) -> Self {
         ParkingLot {
             name,
@@ -942,7 +944,6 @@ where
             }
         }
     }
-
 }
 
 struct Payment {
@@ -963,7 +964,7 @@ struct CreditCardTransaction {
     id: u32,
     card_number: String,
     expiration_date: String,
-    cvv: String,    
+    cvv: String,
     payment: Payment,
 }
 
@@ -971,7 +972,6 @@ struct CashTransaction {
     amount: f32,
     payment: Payment,
 }
-
 
 fn main() {
     let person = Person {

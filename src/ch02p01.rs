@@ -1,4 +1,4 @@
-// Remove Dups: 
+// Remove Dups:
 // ------------
 // Write code to remove duplicates from an unsorted linked list.
 // FOLLOW UP

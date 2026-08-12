@@ -1,5 +1,5 @@
-/* 
-## Cloning trait object 
+/*
+## Cloning trait object
 https://users.rust-lang.org/t/solved-is-it-possible-to-clone-a-boxed-trait-object/1714/5
 
 
@@ -33,9 +33,9 @@ fn it_works() {
 */
 #![allow(unused)]
 
-use std::vec::Vec;
-use rand::{Rng, RngExt};
 use chrono::Utc;
+use rand::{Rng, RngExt};
+use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Suit {
@@ -57,7 +57,6 @@ trait Card {
     fn get_face_value(&self) -> i32;
 }
 
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct BlackjackCard {
     suit: Suit,
@@ -76,7 +75,7 @@ impl BlackjackCard {
     }
 }
 
-impl Card for BlackjackCard { 
+impl Card for BlackjackCard {
     fn get_suit(&self) -> &Suit {
         &self.suit
     }
@@ -145,7 +144,8 @@ impl Shoe {
             let j = rng.random_range(i..card_count);
             let (deck_i, card_i) = self.get_deck_and_card_index(i);
             let (deck_j, card_j) = self.get_deck_and_card_index(j);
-            self.cards[deck_i][card_i] = std::mem::replace(&mut self.cards[deck_j][card_j], Default::default());
+            self.cards[deck_i][card_i] =
+                std::mem::replace(&mut self.cards[deck_j][card_j], Default::default());
         }
     }
 
@@ -178,17 +178,13 @@ trait BasePlayer {
     fn get_total_score(&self) -> i32 {
         0
     }
-    
+
     fn reset_password(&self) -> bool {
         // Implementation for resetting password
         true
     }
 
-    fn place_bet(&mut self, bet: f32) {
-        
-    }
-
-
+    fn place_bet(&mut self, bet: f32) {}
 }
 
 struct Player {
@@ -212,7 +208,7 @@ impl Player {
             person,
             hands: Vec::new(),
             bet: 0.0,
-            total_cash: 0.0
+            total_cash: 0.0,
         }
     }
 }
@@ -255,8 +251,7 @@ impl Dealer {
     }
 }
 
-impl BasePlayer for Dealer { 
-
+impl BasePlayer for Dealer {
     fn get_hands(&self) -> &Vec<Hand> {
         &self.hands
     }
@@ -329,7 +324,6 @@ impl Hand {
     }
 }
 
-
 fn get_bet_from_ui() -> f32 {
     // Implementation for getting bet from UI
     0.0
@@ -391,16 +385,20 @@ impl Game {
 
     fn split(&mut self, hand: &mut Hand) {
         let cards = hand.get_cards().clone();
-        self.player.add_hand(Hand::new(cards[0].clone(), self.shoe.deal_card()));
-        self.player.add_hand(Hand::new(cards[1].clone(), self.shoe.deal_card()));
+        self.player
+            .add_hand(Hand::new(cards[0].clone(), self.shoe.deal_card()));
+        self.player
+            .add_hand(Hand::new(cards[1].clone(), self.shoe.deal_card()));
         self.player.remove_hand(hand);
     }
 
     fn start(&mut self) {
         self.player.place_bet(get_bet_from_ui());
-        self.player.add_hand(Hand::new(self.shoe.deal_card(), self.shoe.deal_card()));
+        self.player
+            .add_hand(Hand::new(self.shoe.deal_card(), self.shoe.deal_card()));
 
-        self.dealer.add_hand(Hand::new(self.shoe.deal_card(), self.shoe.deal_card()));
+        self.dealer
+            .add_hand(Hand::new(self.shoe.deal_card(), self.shoe.deal_card()));
 
         loop {
             let hands = self.player.get_hands().clone();

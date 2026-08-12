@@ -133,11 +133,7 @@ impl BoardState {
     // returns the player (0 or 1) who owns the piece at (x, y) or -1 if no piece at (x, y)
     pub fn piece_player_at(&self, x: u8, y: u8) -> i8 {
         if let Some(piece) = self.board.get(&(x + (8 * y))) {
-            if piece.player() {
-                1
-            } else {
-                0
-            }
+            if piece.player() { 1 } else { 0 }
         } else {
             return -1;
         }

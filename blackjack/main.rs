@@ -23,11 +23,11 @@
 // https://www.educative.io/courses/grokking-the-low-level-design-interview-using-ood-principles/B8E5kYVjonW
 //
 #![allow(unused)]
+use rand::Rng;
+use rand::seq::SliceRandom;
+use std::fmt;
 use std::io;
 use std::{thread, time};
-use rand::seq::SliceRandom;
-use rand::Rng;
-use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -297,9 +297,7 @@ impl fmt::Display for Score {
     }
 }
 
-pub fn get_winner<'a>(
-    dealer: &'a dyn Person, player: &'a dyn Person
-) -> Option<&'a dyn Person> {
+pub fn get_winner<'a>(dealer: &'a dyn Person, player: &'a dyn Person) -> Option<&'a dyn Person> {
     let player_score = get_score(player); // Get their scores.
     let dealer_score = get_score(dealer);
     if player_score == dealer_score {
@@ -393,12 +391,8 @@ fn main() {
         deal_players(&mut deck, &mut dealer, &mut player); // Give the players their initial cards.
 
         // Display inital hand
-        display_playerhand(
-            &dealer.name, dealer.get_hand(), get_score(&dealer)
-        );
-        display_playerhand(
-            &player.name, player.get_hand(), get_score(&player)
-        );
+        display_playerhand(&dealer.name, dealer.get_hand(), get_score(&dealer));
+        display_playerhand(&player.name, player.get_hand(), get_score(&player));
 
         // The player chooses if they want more cards.
         while get_score(&player) < Score::Points(22) && player_wants_to_hit() {
@@ -407,44 +401,19 @@ fn main() {
             announce_dealing(&card, &player.name);
             player.deal_card(card);
             if get_score(&player) == Score::Busted {
-                display_playerhand(
-                    &dealer.name, 
-                    dealer.get_hand(), 
-                    get_score(&dealer)
-                );
-                display_playerhand(
-                    &player.name, 
-                    player.get_hand(), 
-                    get_score(&player)
-                );
+                display_playerhand(&dealer.name, dealer.get_hand(), get_score(&dealer));
+                display_playerhand(&player.name, player.get_hand(), get_score(&player));
                 break;
-            } 
-            else if get_score(&player) == Score::Blackjack {
-                display_playerhand(
-                    &dealer.name, 
-                    dealer.get_hand(), 
-                    get_score(&dealer)
-                );
-                display_playerhand(
-                    &player.name, 
-                    player.get_hand(), 
-                    get_score(&player)
-                );
+            } else if get_score(&player) == Score::Blackjack {
+                display_playerhand(&dealer.name, dealer.get_hand(), get_score(&dealer));
+                display_playerhand(&player.name, player.get_hand(), get_score(&player));
                 break;
             } else {
-                display_playerhand(
-                    &dealer.name, 
-                    dealer.get_hand(), 
-                    get_score(&dealer)
-                );
-                display_playerhand(
-                    &player.name, 
-                    player.get_hand(), 
-                    get_score(&player)
-                );
+                display_playerhand(&dealer.name, dealer.get_hand(), get_score(&dealer));
+                display_playerhand(&player.name, player.get_hand(), get_score(&player));
             }
         }
-        
+
         // Dealer's turn.
         if get_score(&player) != Score::Busted && get_score(&player) != Score::Blackjack {
             let mut dealer_score = get_score(&dealer);
@@ -454,16 +423,8 @@ fn main() {
                 dealer.deal_card(card);
                 dealer_score = get_score(&dealer);
             }
-            display_playerhand(
-                &dealer.name, 
-                dealer.get_hand(), 
-                get_score(&dealer)
-            );
-            display_playerhand(
-                &player.name, 
-                player.get_hand(), 
-                get_score(&player)
-            );
+            display_playerhand(&dealer.name, dealer.get_hand(), get_score(&dealer));
+            display_playerhand(&player.name, player.get_hand(), get_score(&player));
         }
 
         let winner = get_winner(&dealer, &player);

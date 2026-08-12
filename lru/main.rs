@@ -27,40 +27,30 @@ struct DoublyLinkedList {
 
 impl DoublyLinkedList {
     fn new() -> Self {
-        Self {head: None, tail: None}
+        Self {
+            head: None,
+            tail: None,
+        }
     }
 
-    fn add_to_front(&mut self, node: NodeRef) {
+    fn add_to_front(&mut self, node: NodeRef) {}
 
-    }
+    fn add_to_back(&mut self, node: NodeRef) {}
 
-    fn add_to_back(&mut self, node: NodeRef) {
+    fn move_to_head(&mut self, node: NodeRef) {}
 
-    }
-
-    fn move_to_head(&mut self, node: NodeRef) {
-
-    }
-
-    fn move_to_tail(&mut self, node: NodeRef) {
-
-    }
+    fn move_to_tail(&mut self, node: NodeRef) {}
 
     fn remove(&mut self, node: NodeRef) {
-        let (prev, next) = (node.borrow_mut().next.clone(), node.borrow_mut().prev.clone());
+        let (prev, next) = (
+            node.borrow_mut().next.clone(),
+            node.borrow_mut().prev.clone(),
+        );
         match (prev, next) {
-            (Some(p1), Some(n1)) => {
-
-            },
-            (Some(p1), None) => {
-
-            },
-            (None, Some(n1)) => {
-
-            },
-            (None, None) => {
-
-            }
+            (Some(p1), Some(n1)) => {}
+            (Some(p1), None) => {}
+            (None, Some(n1)) => {}
+            (None, None) => {}
         }
     }
 }
@@ -68,7 +58,7 @@ impl DoublyLinkedList {
 #[derive(Debug)]
 pub struct LruCache {
     dll: DoublyLinkedList,
-    cache: HashMap<i32, NodeRef>
+    cache: HashMap<i32, NodeRef>,
 }
 
 impl LruCache {
@@ -76,9 +66,7 @@ impl LruCache {
         0
     }
 
-    fn set(&mut self, key: i32, val: i32) {
-
-    }
+    fn set(&mut self, key: i32, val: i32) {}
 }
 
 fn main() {

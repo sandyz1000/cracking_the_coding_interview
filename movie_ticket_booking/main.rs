@@ -360,17 +360,8 @@ impl MockGateway {
 }
 
 impl PaymentGateway for Arc<MockGateway> {
+    #[allow(unused)]
     fn charge(&self, amount: f64, method: PaymentMethod) -> std::result::Result<String, String> {
-        (**self).charge(amount, method)
-    }
-
-    fn refund(&self, txn_id: &str, amount: f64) -> std::result::Result<(), String> {
-        (**self).refund(txn_id, amount)
-    }
-}
-
-impl PaymentGateway for MockGateway {
-    fn charge(&self, _amount: f64, _method: PaymentMethod) -> std::result::Result<String, String> {
         if self.fail_next.swap(false, Ordering::SeqCst) {
             return Err("mock gateway rejected charge".into());
         }
@@ -380,7 +371,8 @@ impl PaymentGateway for MockGateway {
         ))
     }
 
-    fn refund(&self, _txn_id: &str, _amount: f64) -> std::result::Result<(), String> {
+    #[allow(unused)]
+    fn refund(&self, txn_id: &str, amount: f64) -> std::result::Result<(), String> {
         Ok(())
     }
 }
@@ -501,7 +493,7 @@ impl MovieTicketBookingSystem {
     }
 
     pub fn new() -> Self {
-        Self::with_gateway(Box::new(MockGateway::default()))
+        Self::with_gateway(Box::new(Arc::new(MockGateway::default())))
     }
 
     /// The process-wide default instance, for demo convenience only.

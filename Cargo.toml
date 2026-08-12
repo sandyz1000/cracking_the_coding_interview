@@ -1,5 +1,5 @@
 [workspace]
-members = ["autocomplete-rs", "flight_management", "machine-coding-problems"]
+members = ["autocomplete-rs", "flight_management", "machine-coding-problems", "car_rental"]
 version = "0.1.0"
 authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
 edition = "2024"
@@ -76,10 +76,6 @@ path = "./blackjack/main.rs"
 [[bin]]
 name = "blackjack-design"
 path = "./blackjack/blackjack.rs"
-
-[[bin]]
-name = "car_rental"
-path = "./car_rental/main.rs"
 
 [[bin]]
 name = "chat"
