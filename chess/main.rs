@@ -1,552 +1,100 @@
-#![allow(unused)]
+//! Console chess. One `Piece` type carries a `PieceKind` tag; movement and
+//! symbol are properties of the kind, not of six separate structs.
 
-use strum_macros::Display;
+use std::fmt;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-enum PieceType {
-    Rook,
-    Knight,
-    Bishop,
-    Queen,
+const BOARD_SIZE: i32 = 8;
+
+type Offset = (i32, i32);
+
+const DIAGONALS: [Offset; 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+const ORTHOGONALS: [Offset; 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+const ALL_DIRECTIONS: [Offset; 8] = [
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
+    (0, 1),
+    (0, -1),
+    (1, 0),
+    (-1, 0),
+];
+const KNIGHT_JUMPS: [Offset; 8] = [
+    (2, 1),
+    (2, -1),
+    (-2, 1),
+    (-2, -1),
+    (1, 2),
+    (1, -2),
+    (-1, 2),
+    (-1, -2),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Color {
+    Black,
+    White,
+}
+
+impl Color {
+    fn opponent(self) -> Self {
+        match self {
+            Color::Black => Color::White,
+            Color::White => Color::Black,
+        }
+    }
+
+    fn ansi_prefix(self) -> &'static str {
+        match self {
+            Color::Black => "\x1B[31;1m",
+            Color::White => "\x1B[34;1m",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PieceKind {
     King,
+    Queen,
+    Rook,
+    Bishop,
+    Knight,
     Pawn,
 }
 
-impl PieceSymbol for Piece {
-    fn symbol(&self) -> String {
+impl PieceKind {
+    const fn symbol(self) -> &'static str {
         match self {
-            Piece::King(king) => king.symbol(),
-            Piece::Queen(queen) => queen.symbol(),
-            Piece::Knight(knight) => knight.symbol(),
-            Piece::Rook(rook) => rook.symbol(),
-            Piece::Bishop(bishop) => bishop.symbol(),
-            Piece::Pawn(pawn) => pawn.symbol(),
-        }
-    }
-
-    fn symbol_impl(&self) -> String {
-        todo!()
-    }
-}
-
-impl PieceType {
-    fn new(&self, position: ChessPosition, color: Color) -> Piece {
-        match self {
-            PieceType::King => Piece::King(King::new(position, color)),
-            PieceType::Queen => Piece::Queen(Queen::new(position, color)),
-            PieceType::Knight => Piece::Knight(Knight::new(position, color)),
-            PieceType::Rook => Piece::Rook(Rook::new(position, color)),
-            PieceType::Bishop => Piece::Bishop(Bishop::new(position, color)),
-            PieceType::Pawn => Piece::Pawn(Pawn::new(position, color)),
+            PieceKind::King => "KI",
+            PieceKind::Queen => "QU",
+            PieceKind::Rook => "RO",
+            PieceKind::Bishop => "BI",
+            PieceKind::Knight => "KN",
+            PieceKind::Pawn => "PA",
         }
     }
 }
 
-const CHESS_BOARD_SIZE: usize = 8;
-
-const INITIAL_PIECE_SET_SINGLE: [(PieceType, i32, i32); 16] = [
-    (PieceType::Rook, 0, 0),
-    (PieceType::Knight, 1, 0),
-    (PieceType::Bishop, 2, 0),
-    (PieceType::Queen, 3, 0),
-    (PieceType::King, 4, 0),
-    (PieceType::Bishop, 5, 0),
-    (PieceType::Knight, 6, 0),
-    (PieceType::Rook, 7, 0),
-    (PieceType::Pawn, 0, 1),
-    (PieceType::Pawn, 1, 1),
-    (PieceType::Pawn, 2, 1),
-    (PieceType::Pawn, 3, 1),
-    (PieceType::Pawn, 4, 1),
-    (PieceType::Pawn, 5, 1),
-    (PieceType::Pawn, 6, 1),
-    (PieceType::Pawn, 7, 1),
+const INITIAL_SETUP: [(PieceKind, i32, i32); 16] = [
+    (PieceKind::Rook, 0, 0),
+    (PieceKind::Knight, 1, 0),
+    (PieceKind::Bishop, 2, 0),
+    (PieceKind::Queen, 3, 0),
+    (PieceKind::King, 4, 0),
+    (PieceKind::Bishop, 5, 0),
+    (PieceKind::Knight, 6, 0),
+    (PieceKind::Rook, 7, 0),
+    (PieceKind::Pawn, 0, 1),
+    (PieceKind::Pawn, 1, 1),
+    (PieceKind::Pawn, 2, 1),
+    (PieceKind::Pawn, 3, 1),
+    (PieceKind::Pawn, 4, 1),
+    (PieceKind::Pawn, 5, 1),
+    (PieceKind::Pawn, 6, 1),
+    (PieceKind::Pawn, 7, 1),
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub enum Color {
-    BLACK,
-    WHITE,
-}
-
-trait PieceMaker {
-    fn move_to(&mut self, target_position: ChessPosition);
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition>;
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition>;
-}
-
-trait PieceSymbol {
-    fn __symbol(&self, color: &Color) -> String {
-        let black_color_prefix = "\x1B[31;1m";
-        let white_color_prefix = "\x1B[34;1m";
-        let color_suffix = "\x1B[0m";
-        let mut retval = self.symbol_impl();
-        if *color == Color::BLACK {
-            retval = format!("{}{}{}", black_color_prefix, retval, color_suffix);
-        } else {
-            retval = format!("{}{}{}", white_color_prefix, retval, color_suffix);
-        }
-        retval
-    }
-
-    fn symbol(&self) -> String;
-
-    fn symbol_impl(&self) -> String;
-}
-
-trait PieceProperties {
-    fn get_piece_color(&self) -> Color;
-    fn get_piece_position(&self) -> ChessPosition;
-}
-
-#[derive(Debug, Clone, Display)]
-enum Piece {
-    King(King),
-    Queen(Queen),
-    Knight(Knight),
-    Rook(Rook),
-    Bishop(Bishop),
-    Pawn(Pawn),
-}
-
-impl PieceProperties for Piece {
-    fn get_piece_color(&self) -> Color {
-        match self {
-            Piece::King(king) => king.color.clone(),
-            Piece::Queen(queen) => queen.color.clone(),
-            Piece::Knight(knight) => knight.color.clone(),
-            Piece::Rook(rook) => rook.color.clone(),
-            Piece::Bishop(bishop) => bishop.color.clone(),
-            Piece::Pawn(pawn) => pawn.color.clone(),
-        }
-    }
-
-    fn get_piece_position(&self) -> ChessPosition {
-        match self {
-            Piece::King(king) => king.position,
-            Piece::Queen(queen) => queen.position,
-            Piece::Knight(knight) => knight.position,
-            Piece::Rook(rook) => rook.position,
-            Piece::Bishop(bishop) => bishop.position,
-            Piece::Pawn(pawn) => pawn.position,
-        }
-    }
-}
-
-impl PieceMaker for Piece {
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        match self {
-            Piece::Bishop(bishop) => bishop.get_threatened_positions(board),
-            Piece::King(king) => king.get_threatened_positions(board),
-            Piece::Knight(knight) => knight.get_threatened_positions(board),
-            Piece::Pawn(pawn) => pawn.get_threatened_positions(board),
-            Piece::Rook(rook) => rook.get_threatened_positions(board),
-            Piece::Queen(queen) => queen.get_threatened_positions(board),
-            _ => unreachable!(),
-        }
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        // Use macros to generate all possible moves
-        match self {
-            Piece::Bishop(bishop) => bishop.get_movable_positions(board),
-            Piece::King(king) => king.get_movable_positions(board),
-            Piece::Knight(knight) => knight.get_movable_positions(board),
-            Piece::Pawn(pawn) => pawn.get_movable_positions(board),
-            Piece::Rook(rook) => rook.get_movable_positions(board),
-            Piece::Queen(queen) => queen.get_movable_positions(board),
-            _ => unreachable!(),
-        }
-    }
-
-    fn move_to(&mut self, target_position: ChessPosition) {
-        match self {
-            Piece::King(king) => king.move_to(target_position),
-            Piece::Queen(queen) => queen.move_to(target_position),
-            Piece::Knight(knight) => knight.move_to(target_position),
-            Piece::Rook(rook) => rook.move_to(target_position),
-            Piece::Bishop(bishop) => bishop.move_to(target_position),
-            Piece::Pawn(pawn) => pawn.move_to(target_position),
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct King {
-    position: ChessPosition,
-    color: Color,
-}
-
-impl King {
-    const SPOT_INCREMENTS: [(i32, i32); 8] = [
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
-        (0, -1),
-    ];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        King { position, color }
-    }
-}
-
-impl PieceMaker for King {
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.position = target_position;
-        // self.board_handle.as_ref().unwrap().register_king_position(target_position, self.color);
-    }
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        for increment in King::SPOT_INCREMENTS.iter() {
-            if let Some(position) = board.spot_search_threat(
-                self.position,
-                &self.color,
-                increment.0,
-                increment.1,
-                false,
-                false,
-            ) {
-                positions.push(position);
-            }
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        self.get_threatened_positions(board)
-    }
-}
-
-impl PieceSymbol for King {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-
-    fn symbol_impl(&self) -> String {
-        "KI".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Pawn {
-    position: ChessPosition,
-    color: Color,
-    moved: bool,
-    // board_handle: Option<&'a ChessBoard<'a>>,
-}
-
-impl Pawn {
-    const SPOT_INCREMENTS_MOVE: [(i32, i32); 2] = [(0, 1), (0, 0)];
-    const SPOT_INCREMENTS_MOVE_FIRST: [(i32, i32); 2] = [(0, 1), (0, 2)];
-    const SPOT_INCREMENTS_TAKE: [(i32, i32); 2] = [(-1, 1), (1, 1)];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        Pawn {
-            position,
-            color,
-            moved: false,
-        }
-    }
-}
-
-impl PieceMaker for Pawn {
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        let increments = Pawn::SPOT_INCREMENTS_TAKE;
-        for increment in increments.iter() {
-            let dy = if self.color == Color::WHITE {
-                increment.1
-            } else {
-                -increment.1
-            };
-            if let Some(position) =
-                board.spot_search_threat(self.position, &self.color, increment.0, dy, false, false)
-            {
-                positions.push(position);
-            }
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        let increments = if self.moved {
-            Pawn::SPOT_INCREMENTS_MOVE
-        } else {
-            Pawn::SPOT_INCREMENTS_MOVE_FIRST
-        };
-        for increment in increments.iter() {
-            let dy = if self.color == Color::WHITE {
-                increment.1
-            } else {
-                -increment.1
-            };
-            if let Some(position) =
-                board.spot_search_threat(self.position, &self.color, increment.0, dy, true, false)
-            {
-                positions.push(position);
-            }
-        }
-
-        let increments = Pawn::SPOT_INCREMENTS_TAKE;
-        for increment in increments.iter() {
-            let dy = if self.color == Color::WHITE {
-                increment.1
-            } else {
-                -increment.1
-            };
-            if let Some(position) =
-                board.spot_search_threat(self.position, &self.color, increment.0, dy, false, true)
-            {
-                positions.push(position);
-            }
-        }
-        positions
-    }
-
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.moved = true;
-        self.position = target_position;
-    }
-}
-
-impl PieceSymbol for Pawn {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-
-    fn symbol_impl(&self) -> String {
-        "PA".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Bishop {
-    position: ChessPosition,
-    color: Color,
-}
-
-impl Bishop {
-    const BEAM_INCREMENTS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        Bishop { position, color }
-    }
-}
-
-impl PieceMaker for Bishop {
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.position = target_position;
-    }
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        for increment in Bishop::BEAM_INCREMENTS.iter() {
-            positions.extend(board.beam_search_threat(
-                self.position,
-                &self.color,
-                increment.0,
-                increment.1,
-            ));
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        self.get_threatened_positions(board)
-    }
-}
-
-impl PieceSymbol for Bishop {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-
-    fn symbol_impl(&self) -> String {
-        "BI".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Knight {
-    position: ChessPosition,
-    color: Color,
-}
-
-impl Knight {
-    const SPOT_INCREMENTS: [(i32, i32); 8] = [
-        (2, 1),
-        (2, -1),
-        (-2, 1),
-        (-2, -1),
-        (1, 2),
-        (1, -2),
-        (-1, 2),
-        (-1, -2),
-    ];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        Knight { position, color }
-    }
-}
-
-impl PieceMaker for Knight {
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.position = target_position;
-    }
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        for increment in Knight::SPOT_INCREMENTS.iter() {
-            if let Some(position) = board.spot_search_threat(
-                self.position,
-                &self.color,
-                increment.0,
-                increment.1,
-                false,
-                false,
-            ) {
-                positions.push(position);
-            }
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        self.get_threatened_positions(board)
-    }
-}
-
-impl PieceSymbol for Knight {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-
-    fn symbol_impl(&self) -> String {
-        "KN".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Rook {
-    position: ChessPosition,
-    color: Color,
-}
-
-impl Rook {
-    const BEAM_INCREMENTS: [(i32, i32); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        Rook { position, color }
-    }
-}
-
-impl PieceMaker for Rook {
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.position = target_position;
-    }
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        for increment in Rook::BEAM_INCREMENTS.iter() {
-            positions.extend(board.beam_search_threat(
-                self.position,
-                &self.color,
-                increment.0,
-                increment.1,
-            ));
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        self.get_threatened_positions(board)
-    }
-}
-
-impl PieceSymbol for Rook {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-    fn symbol_impl(&self) -> String {
-        "RO".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Queen {
-    position: ChessPosition,
-    color: Color,
-}
-
-impl Queen {
-    const BEAM_INCREMENTS: [(i32, i32); 8] = [
-        (1, 1),
-        (1, -1),
-        (-1, 1),
-        (-1, -1),
-        (0, 1),
-        (0, -1),
-        (1, 0),
-        (-1, 0),
-    ];
-
-    fn new(position: ChessPosition, color: Color) -> Self {
-        Queen { position, color }
-    }
-}
-
-impl PieceMaker for Queen {
-    fn move_to(&mut self, target_position: ChessPosition) {
-        self.position = target_position;
-    }
-
-    fn get_threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        let mut positions = Vec::new();
-        for increment in Queen::BEAM_INCREMENTS.iter() {
-            positions.extend(board.beam_search_threat(
-                self.position,
-                &self.color,
-                increment.0,
-                increment.1,
-            ));
-        }
-        positions
-    }
-
-    fn get_movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
-        self.get_threatened_positions(board)
-    }
-}
-
-impl PieceSymbol for Queen {
-    fn symbol(&self) -> String {
-        self.__symbol(&self.color)
-    }
-    fn symbol_impl(&self) -> String {
-        "QU".to_owned()
-    }
-}
-
-struct Player;
-
-impl Player {
-    fn play_chess(&self) {
-        let render = Some(ConsoleRender);
-        let mut game = ChessGame::new(render.as_ref());
-        game.run();
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ChessPosition {
     x_coord: i32,
     y_coord: i32,
@@ -558,26 +106,214 @@ impl ChessPosition {
     }
 
     fn from_string(string: &str) -> Option<Self> {
-        if string.len() != 2 {
+        let chars: Vec<char> = string.chars().collect();
+        if chars.len() != 2 {
             return None;
         }
-        let chars: Vec<char> = string.chars().collect();
         let x_coord = chars[0] as i32 - 'a' as i32;
         let y_coord = chars[1] as i32 - '1' as i32;
         Some(ChessPosition::new(x_coord, y_coord))
     }
-}
 
-impl std::fmt::Display for ChessPosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let x_char = ('a' as u8 + self.x_coord as u8) as char;
-        write!(f, "{}{}", x_char, self.y_coord + 1)
+    fn offset_by(self, (dx, dy): Offset) -> Self {
+        ChessPosition::new(self.x_coord + dx, self.y_coord + dy)
     }
 }
 
-impl PartialEq for ChessPosition {
-    fn eq(&self, other: &Self) -> bool {
-        self.x_coord == other.x_coord && self.y_coord == other.y_coord
+impl fmt::Display for ChessPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let file = (b'a' + self.x_coord as u8) as char;
+        write!(f, "{}{}", file, self.y_coord + 1)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Piece {
+    kind: PieceKind,
+    position: ChessPosition,
+    color: Color,
+    moved: bool,
+}
+
+impl Piece {
+    fn new(kind: PieceKind, position: ChessPosition, color: Color) -> Self {
+        Piece {
+            kind,
+            position,
+            color,
+            moved: false,
+        }
+    }
+
+    fn symbol(&self) -> String {
+        format!("{}{}\x1B[0m", self.color.ansi_prefix(), self.kind.symbol())
+    }
+
+    fn move_to(&mut self, target: ChessPosition) {
+        self.position = target;
+        self.moved = true;
+    }
+
+    /// Which way this piece's pawns advance.
+    fn forward(&self) -> i32 {
+        match self.color {
+            Color::White => 1,
+            Color::Black => -1,
+        }
+    }
+
+    /// Where this piece may move.
+    fn movable_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
+        match self.kind {
+            PieceKind::King => self.steps(board, &ALL_DIRECTIONS),
+            PieceKind::Knight => self.steps(board, &KNIGHT_JUMPS),
+            PieceKind::Queen => self.rays(board, &ALL_DIRECTIONS),
+            PieceKind::Rook => self.rays(board, &ORTHOGONALS),
+            PieceKind::Bishop => self.rays(board, &DIAGONALS),
+            PieceKind::Pawn => self.pawn_moves(board),
+        }
+    }
+
+    /// What this piece attacks — the same squares, except a pawn guards its
+    /// diagonals whether or not anything is standing on them.
+    fn threatened_positions(&self, board: &ChessBoard) -> Vec<ChessPosition> {
+        match self.kind {
+            PieceKind::Pawn => self
+                .pawn_diagonals()
+                .into_iter()
+                .filter(|target| board.contains(*target))
+                .collect(),
+            _ => self.movable_positions(board),
+        }
+    }
+
+    fn steps(&self, board: &ChessBoard, offsets: &[Offset]) -> Vec<ChessPosition> {
+        offsets
+            .iter()
+            .map(|offset| self.position.offset_by(*offset))
+            .filter(|target| board.is_empty(*target) || board.holds_enemy_of(*target, self.color))
+            .collect()
+    }
+
+    fn rays(&self, board: &ChessBoard, directions: &[Offset]) -> Vec<ChessPosition> {
+        directions
+            .iter()
+            .flat_map(|direction| board.ray_targets(self.position, self.color, *direction))
+            .collect()
+    }
+
+    fn pawn_moves(&self, board: &ChessBoard) -> Vec<ChessPosition> {
+        let mut moves = Vec::new();
+        let one_step = self.position.offset_by((0, self.forward()));
+        if board.is_empty(one_step) {
+            moves.push(one_step);
+            let two_steps = self.position.offset_by((0, 2 * self.forward()));
+            if !self.moved && board.is_empty(two_steps) {
+                moves.push(two_steps);
+            }
+        }
+        moves.extend(
+            self.pawn_diagonals()
+                .into_iter()
+                .filter(|target| board.holds_enemy_of(*target, self.color)),
+        );
+        moves
+    }
+
+    fn pawn_diagonals(&self) -> [ChessPosition; 2] {
+        let forward = self.forward();
+        [
+            self.position.offset_by((-1, forward)),
+            self.position.offset_by((1, forward)),
+        ]
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ChessBoard {
+    size: i32,
+    pieces: Vec<Piece>,
+}
+
+impl ChessBoard {
+    fn new(size: i32) -> Self {
+        let mut board = ChessBoard {
+            size,
+            pieces: Vec::new(),
+        };
+        for &(kind, x, y) in &INITIAL_SETUP {
+            board
+                .pieces
+                .push(Piece::new(kind, ChessPosition::new(x, y), Color::White));
+            // Mirror the rank only: mirroring the file too would land the
+            // black king on d8 opposite the white king on e1.
+            board.pieces.push(Piece::new(
+                kind,
+                ChessPosition::new(x, size - y - 1),
+                Color::Black,
+            ));
+        }
+        board
+    }
+
+    fn contains(&self, position: ChessPosition) -> bool {
+        (0..self.size).contains(&position.x_coord) && (0..self.size).contains(&position.y_coord)
+    }
+
+    fn piece_at(&self, position: ChessPosition) -> Option<&Piece> {
+        self.pieces.iter().find(|piece| piece.position == position)
+    }
+
+    /// Derived rather than cached: a stored king position is one more thing to
+    /// keep in step with the piece list.
+    fn king_position(&self, color: Color) -> Option<ChessPosition> {
+        self.pieces
+            .iter()
+            .find(|piece| piece.kind == PieceKind::King && piece.color == color)
+            .map(|king| king.position)
+    }
+
+    /// Squares reachable along one direction, stopping at the first piece and
+    /// including it only when it is an enemy.
+    fn ray_targets(
+        &self,
+        from: ChessPosition,
+        own_color: Color,
+        direction: Offset,
+    ) -> Vec<ChessPosition> {
+        let mut targets = Vec::new();
+        let mut current = from.offset_by(direction);
+        while self.contains(current) {
+            if let Some(piece) = self.piece_at(current) {
+                if piece.color != own_color {
+                    targets.push(current);
+                }
+                break;
+            }
+            targets.push(current);
+            current = current.offset_by(direction);
+        }
+        targets
+    }
+
+    fn is_empty(&self, position: ChessPosition) -> bool {
+        self.contains(position) && self.piece_at(position).is_none()
+    }
+
+    fn holds_enemy_of(&self, position: ChessPosition, color: Color) -> bool {
+        self.piece_at(position)
+            .is_some_and(|piece| piece.color != color)
+    }
+
+    fn execute_move(&mut self, command: MoveCommand) {
+        self.pieces.retain(|piece| piece.position != command.dst);
+        if let Some(source) = self
+            .pieces
+            .iter_mut()
+            .find(|piece| piece.position == command.src)
+        {
+            source.move_to(command.dst);
+        }
     }
 }
 
@@ -588,377 +324,257 @@ struct MoveCommand {
 }
 
 impl MoveCommand {
-    fn new(src: ChessPosition, dst: ChessPosition) -> Self {
-        MoveCommand { src, dst }
-    }
-
     fn from_string(string: &str) -> Option<Self> {
         let tokens: Vec<&str> = string.split_whitespace().collect();
         if tokens.len() != 2 {
             return None;
         }
-        let src = ChessPosition::from_string(tokens[0]);
-        let dst = ChessPosition::from_string(tokens[1]);
-        match (src, dst) {
-            (Some(src), Some(dst)) => Some(MoveCommand::new(src, dst)),
-            _ => None,
-        }
+        Some(MoveCommand {
+            src: ChessPosition::from_string(tokens[0])?,
+            dst: ChessPosition::from_string(tokens[1])?,
+        })
     }
 }
 
-#[derive(Clone)]
-struct ChessGameState {
-    pieces: Vec<Piece>,
-    board_size: i32,
+trait Renderer {
+    fn render(&self, board: &ChessBoard);
+    fn print_line(&self, line: &str);
 }
 
-struct ChessGame<'a, R: InputRender> {
-    finished: bool,
+struct ConsoleRenderer;
+
+impl Renderer for ConsoleRenderer {
+    fn render(&self, board: &ChessBoard) {
+        for row in (0..board.size).rev() {
+            self.draw_row(board, row);
+        }
+        let mut legend = " ".repeat(3);
+        for column in 0..board.size {
+            legend.push((b'a' + column as u8) as char);
+        }
+        println!("{legend}");
+    }
+
+    fn print_line(&self, line: &str) {
+        println!("{line}");
+    }
+}
+
+impl ConsoleRenderer {
+    fn draw_row(&self, board: &ChessBoard, row: i32) {
+        let white_square = "\u{001b}[47m";
+        let black_square = "\u{001b}[40m";
+        let reset = "\u{001b}[0m";
+
+        print!("{:<2} ", row + 1);
+        for column in 0..board.size {
+            let shade = if (column + row % 2) % 2 == 1 {
+                black_square
+            } else {
+                white_square
+            };
+            let contents = board
+                .piece_at(ChessPosition::new(column, row))
+                .map_or_else(|| " ".to_owned(), |piece| piece.symbol());
+            print!("{shade}{contents}{reset}");
+        }
+        println!();
+    }
+}
+
+struct ChessGame<'a> {
     board: ChessBoard,
-    renderer: Option<&'a R>,
-    status: &'static str,
+    renderer: &'a dyn Renderer,
+    turn: Color,
 }
 
-impl<'a, R: InputRender> ChessGame<'a, R> {
-    const STATUS_WHITE_MOVE: &'static str = "white_move";
-    const STATUS_BLACK_MOVE: &'static str = "black_move";
-    const STATUS_WHITE_VICTORY: &'static str = "white_victory";
-    const STATUS_BLACK_VICTORY: &'static str = "black_victory";
-
-    fn new(renderer: Option<&'a R>) -> Self {
+impl<'a> ChessGame<'a> {
+    fn new(renderer: &'a dyn Renderer) -> Self {
         ChessGame {
-            finished: false,
-            board: ChessBoard::new(8),
+            board: ChessBoard::new(BOARD_SIZE),
             renderer,
-            status: Self::STATUS_WHITE_MOVE,
+            turn: Color::White,
         }
     }
 
     fn run(&mut self) {
-        if let Some(renderer) = self.renderer {
-            renderer.render(self.get_game_state());
-        }
-        while !self.finished {
-            let command = self.parse_command();
-            if command.is_none() && self.renderer.is_some() {
-                if let Some(renderer) = self.renderer {
-                    renderer.print_line("Invalid command, please re-enter.");
-                }
-                continue;
-            }
-            if !self.try_move(command.unwrap()) {
-                if let Some(renderer) = self.renderer {
-                    renderer.print_line("Invalid command, please re-enter.");
-                }
-                continue;
-            }
-
-            self.board.execute_move(command.as_ref().unwrap());
-            self.status = match self.status {
-                Self::STATUS_WHITE_MOVE => Self::STATUS_BLACK_MOVE,
-                Self::STATUS_BLACK_MOVE => Self::STATUS_WHITE_MOVE,
-                _ => self.status,
+        self.renderer.render(&self.board);
+        loop {
+            let Some(line) = read_line() else {
+                return; // end of input
             };
-            if let Some(renderer) = self.renderer {
-                renderer.render(self.get_game_state());
+            let Some(command) = MoveCommand::from_string(&line) else {
+                self.renderer
+                    .print_line("Invalid command, please re-enter.");
+                continue;
+            };
+            if !self.is_legal(command) {
+                self.renderer.print_line(&format!(
+                    "Illegal move {} {}, please re-enter.",
+                    command.src, command.dst
+                ));
+                continue;
             }
+            self.board.execute_move(command);
+            self.turn = self.turn.opponent();
+            self.renderer.render(&self.board);
         }
     }
 
-    fn try_move(&mut self, command: MoveCommand) -> bool {
-        let mut board_copy = self.board.clone();
-        let src_piece = board_copy.get_piece(command.src);
-        if src_piece.is_none() {
+    /// A move is legal when the mover owns the piece, the destination is one
+    /// the piece can reach, and the resulting position leaves its own king
+    /// unattacked.
+    fn is_legal(&self, command: MoveCommand) -> bool {
+        let Some(source) = self.board.piece_at(command.src) else {
+            return false;
+        };
+        if source.color != self.turn
+            || !source.movable_positions(&self.board).contains(&command.dst)
+        {
             return false;
         }
-        if let Some(src_piece) = src_piece {
-            match src_piece {
-                Piece::King(king) => self.board.set_board_handle(),
-                _ => unreachable!(),
-            }
-            if (self.status == Self::STATUS_WHITE_MOVE
-                && src_piece.get_piece_color() == Color::BLACK)
-                || (self.status == Self::STATUS_BLACK_MOVE
-                    && src_piece.get_piece_color() == Color::WHITE)
-            {
-                return false;
-            }
-
-            if !src_piece
-                .get_movable_positions(&board_copy)
-                .contains(&command.dst)
-                && !src_piece
-                    .get_threatened_positions(&board_copy)
-                    .contains(&command.dst)
-            {
-                return false;
-            }
-        };
-
-        board_copy.execute_move(&command);
-        for piece in &board_copy.pieces {
-            if self.status == Self::STATUS_WHITE_MOVE
-                && board_copy.white_king_position().map_or(false, |pos| {
-                    piece.get_threatened_positions(&board_copy).contains(&pos)
-                })
-            {
-                return false;
-            } else if self.status == Self::STATUS_BLACK_MOVE
-                && board_copy.black_king_position().map_or(false, |pos| {
-                    piece.get_threatened_positions(&board_copy).contains(&pos)
-                })
-            {
-                return false;
-            }
-        }
-        true
+        let mut projected = self.board.clone();
+        projected.execute_move(command);
+        !projected.is_king_attacked(self.turn)
     }
-
-    fn parse_command(&self) -> Option<MoveCommand> {
-        let mut input = String::new();
-        if let Ok(_) = std::io::stdin().read_line(&mut input) {
-            MoveCommand::from_string(&input)
-        } else {
-            None
-        }
-    }
-
-    fn get_game_state(&self) -> ChessGameState {
-        ChessGameState {
-            pieces: self.board.pieces.clone(),
-            board_size: self.board.size as i32,
-        }
-    }
-}
-
-trait InputRender {
-    fn render(&self, game_state: ChessGameState);
-
-    fn print_line(&self, string: &str);
-}
-
-struct ConsoleRender;
-
-impl InputRender for ConsoleRender {
-    fn render(&self, game: ChessGameState) {
-        for i in (0..game.board_size).rev() {
-            self._draw_board_line(i, &game.pieces, game.board_size);
-        }
-        self._draw_bottom_line(game.board_size);
-    }
-
-    fn print_line(&self, string: &str) {
-        println!("{}", string);
-    }
-}
-
-impl ConsoleRender {
-    fn _draw_time_line(&self, countdown_white: i32, countdown_black: i32) {
-        println!(
-            "Time remaining: {}s W / B {}s",
-            countdown_white, countdown_black
-        );
-    }
-
-    fn _draw_board_line(&self, line_number: i32, pieces: &Vec<Piece>, board_size: i32) {
-        let empty_square = " ";
-        let white_square_prefix = "\u{001b}[47m";
-        let black_square_prefix = "\u{001b}[40m";
-        let reset_suffix = "\u{001b}[0m";
-        let black_first_offset = line_number % 2;
-
-        let legend = format!("{:<2} ", line_number + 1);
-        print!("{}", legend);
-        for i in 0..board_size {
-            let is_black = (i + black_first_offset) % 2;
-            let prefix = if is_black == 1 {
-                black_square_prefix
-            } else {
-                white_square_prefix
-            };
-            let mut contents = empty_square.to_owned();
-            let curr_position = ChessPosition::new(i, line_number);
-            for piece in pieces {
-                if curr_position == piece.get_piece_position() {
-                    contents = piece.symbol();
-                }
-            }
-            let square_str = format!("{}{}{}", prefix, contents, reset_suffix);
-            print!("{}", square_str);
-        }
-        println!();
-    }
-
-    fn _draw_bottom_line(&self, board_size: i32) {
-        let vertical_legend_offset = 3;
-        let mut line = " ".repeat(vertical_legend_offset as usize);
-        for i in 0..board_size {
-            line.push((b'a' + i as u8) as char);
-        }
-        println!("{}", line);
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ChessBoard {
-    size: usize,
-    pieces: Vec<Piece>,
-    white_king_position: Option<ChessPosition>,
-    black_king_position: Option<ChessPosition>,
 }
 
 impl ChessBoard {
-    fn new(size: usize) -> Self {
-        let mut board = ChessBoard {
-            size,
-            pieces: vec![],
-            white_king_position: None,
-            black_king_position: None,
+    fn is_king_attacked(&self, color: Color) -> bool {
+        let Some(king) = self.king_position(color) else {
+            return false;
         };
-        board.initialize_pieces(&INITIAL_PIECE_SET_SINGLE);
-        board
-    }
-
-    fn initialize_pieces(&mut self, pieces_setup: &[(PieceType, i32, i32)]) {
-        for &(piece_type, x, y) in pieces_setup {
-            let piece_white = piece_type.new(ChessPosition::new(x, y), Color::WHITE);
-            if piece_type == PieceType::King {
-                self.set_board_handle();
-            }
-            self.pieces.push(piece_white);
-
-            // Put the block on the opposite side
-            let piece_black = piece_type.new(
-                ChessPosition::new(self.size as i32 - x - 1, self.size as i32 - y - 1),
-                Color::BLACK,
-            );
-            if piece_type == PieceType::King {
-                self.set_board_handle();
-            }
-            self.pieces.push(piece_black);
-        }
-    }
-
-    fn get_piece(&self, position: ChessPosition) -> Option<Piece> {
-        self.pieces.clone().into_iter().find(|piece| {
-            // let x = if let Some(piece) = piece.downcast_ref::<Piece>() {
-            //     piece.position == position
-            // } else {
-            //     false
-            // }
-            // x
-            // piece.position == position
-            true
-        })
-    }
-
-    fn beam_search_threat(
-        &self,
-        start_position: ChessPosition,
-        own_color: &Color,
-        increment_x: i32,
-        increment_y: i32,
-    ) -> Vec<ChessPosition> {
-        let mut threatened_positions = vec![];
-        let (mut curr_x, mut curr_y) = (start_position.x_coord, start_position.y_coord);
-        curr_x += increment_x;
-        curr_y += increment_y;
-        while curr_x >= 0 && curr_y >= 0 && curr_x < self.size as i32 && curr_y < self.size as i32 {
-            let curr_position: ChessPosition = ChessPosition::new(curr_x, curr_y);
-            if let Some(curr_piece) = self.get_piece(curr_position) {
-                if curr_piece.get_piece_color() != *own_color {
-                    threatened_positions.push(curr_position);
-                }
-                break;
-            }
-            threatened_positions.push(curr_position);
-            curr_x += increment_x;
-            curr_y += increment_y;
-        }
-        threatened_positions
-    }
-
-    fn spot_search_threat(
-        &self,
-        start_position: ChessPosition,
-        own_color: &Color,
-        increment_x: i32,
-        increment_y: i32,
-        threat_only: bool,
-        free_only: bool,
-    ) -> Option<ChessPosition> {
-        let curr_x = start_position.x_coord + increment_x;
-        let curr_y = start_position.y_coord + increment_y;
-
-        if curr_x >= self.size as i32 || curr_y >= self.size as i32 || curr_x < 0 || curr_y < 0 {
-            return None;
-        }
-
-        let curr_position = ChessPosition::new(curr_x, curr_y);
-        if let Some(curr_piece) = self.get_piece(curr_position) {
-            if free_only {
-                return None;
-            }
-            return if curr_piece.get_piece_color() != *own_color {
-                Some(curr_position)
-            } else {
-                None
-            };
-        }
-        if threat_only {
-            None
-        } else {
-            Some(curr_position)
-        }
-    }
-
-    fn pieces(&self) -> Vec<Piece> {
-        self.pieces.clone()
-    }
-
-    fn size(&self) -> usize {
-        self.size
-    }
-
-    fn white_king_position(&self) -> Option<ChessPosition> {
-        self.white_king_position
-    }
-
-    fn black_king_position(&self) -> Option<ChessPosition> {
-        unimplemented!()
-    }
-
-    fn execute_move(&mut self, command: &MoveCommand) {
-        let mut source_piece = self
-            .get_piece(command.src)
-            .expect("Invalid source position");
-        if let Some(idx) = self
-            .pieces
+        self.pieces
             .iter()
-            .position(|piece| piece.get_piece_position() == command.dst)
-        {
-            self.pieces.remove(idx);
-        }
-        source_piece.move_to(command.dst);
+            .filter(|piece| piece.color == color.opponent())
+            .any(|piece| piece.threatened_positions(self).contains(&king))
     }
+}
 
-    fn register_king_position(&mut self, position: ChessPosition, color: Color) {
-        match color {
-            Color::WHITE => self.white_king_position = Some(position),
-            Color::BLACK => self.black_king_position = Some(position),
-            _ => panic!("Unknown color of the king piece"),
-        }
-    }
-
-    fn set_board_handle(&mut self) {
-        // self.board_handle = Some(board);
-        // if let Some(handle) = self.board_handle.as_ref() {
-        //     handle.register_king_position(self.position, self.color);
-        // }
+fn read_line() -> Option<String> {
+    let mut input = String::new();
+    match std::io::stdin().read_line(&mut input) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(input),
     }
 }
 
 fn main() {
-    let player = Player;
-    player.play_chess();
+    ChessGame::new(&ConsoleRenderer).run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(square: &str) -> ChessPosition {
+        ChessPosition::from_string(square).expect("valid square")
+    }
+
+    fn board_with(pieces: &[(PieceKind, Color, &str)]) -> ChessBoard {
+        ChessBoard {
+            size: BOARD_SIZE,
+            pieces: pieces
+                .iter()
+                .map(|&(kind, color, square)| Piece::new(kind, at(square), color))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn test_initial_setup() {
+        let board = ChessBoard::new(BOARD_SIZE);
+        assert_eq!(board.pieces.len(), 32);
+        assert_eq!(board.king_position(Color::White), Some(at("e1")));
+        assert_eq!(board.king_position(Color::Black), Some(at("e8")));
+    }
+
+    #[test]
+    fn test_rook_blocked() {
+        let board = board_with(&[
+            (PieceKind::Rook, Color::White, "a1"),
+            (PieceKind::Pawn, Color::White, "a3"),
+            (PieceKind::Pawn, Color::Black, "d1"),
+        ]);
+        let moves = board.piece_at(at("a1")).unwrap().movable_positions(&board);
+        assert!(moves.contains(&at("a2")));
+        assert!(!moves.contains(&at("a3")), "own piece blocks");
+        assert!(!moves.contains(&at("a4")), "cannot slide past a blocker");
+        assert!(moves.contains(&at("d1")), "captures the enemy it reaches");
+        assert!(!moves.contains(&at("e1")), "stops at the captured square");
+    }
+
+    #[test]
+    fn test_pawn_push() {
+        let board = board_with(&[(PieceKind::Pawn, Color::White, "b2")]);
+        let moves = board.piece_at(at("b2")).unwrap().movable_positions(&board);
+        assert!(moves.contains(&at("b3")));
+        assert!(moves.contains(&at("b4")), "two squares on the first move");
+        assert!(
+            !moves.contains(&at("c3")),
+            "no capture on an empty diagonal"
+        );
+    }
+
+    #[test]
+    fn test_pawn_capture() {
+        let board = board_with(&[
+            (PieceKind::Pawn, Color::White, "b2"),
+            (PieceKind::Knight, Color::Black, "b3"),
+            (PieceKind::Knight, Color::Black, "c3"),
+        ]);
+        let moves = board.piece_at(at("b2")).unwrap().movable_positions(&board);
+        assert!(!moves.contains(&at("b3")), "blocked head-on");
+        assert!(!moves.contains(&at("b4")), "cannot jump the blocker");
+        assert!(moves.contains(&at("c3")), "captures diagonally");
+    }
+
+    #[test]
+    fn test_pawn_direction() {
+        let board = board_with(&[(PieceKind::Pawn, Color::Black, "b7")]);
+        let moves = board.piece_at(at("b7")).unwrap().movable_positions(&board);
+        assert!(moves.contains(&at("b6")), "black advances downward");
+        assert!(!moves.contains(&at("b8")));
+    }
+
+    #[test]
+    fn test_check_detection() {
+        let board = board_with(&[
+            (PieceKind::King, Color::White, "e1"),
+            (PieceKind::Rook, Color::Black, "e8"),
+        ]);
+        assert!(board.is_king_attacked(Color::White));
+        assert!(!board.is_king_attacked(Color::Black));
+    }
+
+    #[test]
+    fn test_pinned_piece() {
+        // The bishop on e2 is pinned by the rook on e8; moving it exposes e1.
+        let mut game = ChessGame::new(&ConsoleRenderer);
+        game.board = board_with(&[
+            (PieceKind::King, Color::White, "e1"),
+            (PieceKind::Bishop, Color::White, "e2"),
+            (PieceKind::Rook, Color::Black, "e8"),
+        ]);
+        let command = MoveCommand {
+            src: at("e2"),
+            dst: at("d3"),
+        };
+        assert!(!game.is_legal(command));
+    }
+
+    #[test]
+    fn test_capture_removes() {
+        let mut board = board_with(&[
+            (PieceKind::Rook, Color::White, "a1"),
+            (PieceKind::Pawn, Color::Black, "a7"),
+        ]);
+        board.execute_move(MoveCommand {
+            src: at("a1"),
+            dst: at("a7"),
+        });
+        assert_eq!(board.pieces.len(), 1);
+        assert_eq!(board.pieces[0].kind, PieceKind::Rook);
+        assert_eq!(board.pieces[0].position, at("a7"));
+    }
 }

@@ -1,4 +1,6 @@
-//! Car rental system. Design decisions: see `DESIGN.md`.
+//! Car rental system.
+//!
+//! Spec: `readme.md`. Design decisions taken on top of it: `DESIGN.md`.
 
 pub mod adapters;
 pub mod domain;
@@ -37,7 +39,7 @@ pub(crate) mod test_util {
             .expect("customer registered as user")
     }
 
-    pub(crate) fn vehicle(_system: &CarRentalSystem, barcode: &str) -> Vehicle {
+    pub(crate) fn vehicle(barcode: &str) -> Vehicle {
         Vehicle::new(VehicleSpec {
             barcode: barcode.into(),
             license_number: format!("{barcode}-LIC"),

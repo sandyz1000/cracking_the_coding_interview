@@ -278,8 +278,8 @@ impl LibraryManager {
     /// empty keyword returns the whole catalog.
     pub fn search_books(&self, keyword: &str) -> Vec<Book> {
         let keyword = keyword.to_lowercase();
-        read_guard(&self.catalog)
-            .values()
+        let catalog = read_guard(&self.catalog);
+        catalog.values()
             .filter(|b| {
                 b.title.to_lowercase().contains(&keyword)
                     || b.author.to_lowercase().contains(&keyword)

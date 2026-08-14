@@ -1,67 +1,57 @@
-#![allow(unused)]
-
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
-use std::io::Result;
-use std::num;
-use std::ops::Range;
 
-#[derive(Copy, Clone, PartialEq)]
-pub enum PieceType {
-    Pawn,
-    Rook,
-    Knight,
-    Bishop,
-    Queen,
-    King,
-    Empty,
+fn index(x: u8, y: u8) -> u8 {
+    x + (8 * y)
 }
 
-#[derive(Copy, Clone)]
-pub struct Piece {
-    piece_type: PieceType,
-    player: bool,
+fn in_bounds(x: u8, y: u8) -> bool {
+    x < 8 && y < 8
 }
 
-impl Piece {
-    pub fn new(piece_type: PieceType, player: bool) -> Self {
-        Piece { piece_type, player }
+fn abs_dif(x: u8, y: u8) -> u8 {
+    (x as i16 - y as i16).unsigned_abs() as u8
+}
+
+/// -1, 0 or 1: the direction to walk from `from` towards `to`.
+fn step(from: u8, to: u8) -> i8 {
+    match to.cmp(&from) {
+        std::cmp::Ordering::Greater => 1,
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+    }
+}
+
+pub trait BoardMethod {
+    fn board(&self) -> &HashMap<u8, Box<dyn PieceMaker>>;
+    fn board_mut(&mut self) -> &mut HashMap<u8, Box<dyn PieceMaker>>;
+
+    fn insert(&mut self, key: u8, value: Box<dyn PieceMaker>) {
+        self.board_mut().insert(key, value);
     }
 
-    pub fn piece_type(&self) -> PieceType {
-        self.piece_type
-    }
-    pub fn player(&self) -> bool {
-        self.player
+    fn remove(&mut self, key: &u8) -> Option<Box<dyn PieceMaker>> {
+        self.board_mut().remove(key)
     }
 
-    pub fn to_string(self) -> String {
-        return if !self.player {
-            match self.piece_type {
-                PieceType::Pawn => "1P".to_string(),
-                PieceType::Rook => "1R".to_string(),
-                PieceType::Knight => "1N".to_string(),
-                PieceType::Bishop => "1B".to_string(),
-                PieceType::Queen => "1Q".to_string(),
-                PieceType::King => "1K".to_string(),
-                PieceType::Empty => " ".to_string(),
-            }
-        } else {
-            match self.piece_type {
-                PieceType::Pawn => "2P︎".to_string(),
-                PieceType::Rook => "2R".to_string(),
-                PieceType::Knight => "2N".to_string(),
-                PieceType::Bishop => "2B".to_string(),
-                PieceType::Queen => "2Q".to_string(),
-                PieceType::King => "2K".to_string(),
-                PieceType::Empty => " ".to_string(),
-            }
-        };
+    fn get(&self, key: &u8) -> Option<&dyn PieceMaker> {
+        self.board().get(key).map(|piece| &**piece)
     }
 }
 
 pub struct BoardState {
-    board: HashMap<u8, Piece>,
+    board: HashMap<u8, Box<dyn PieceMaker>>,
+}
+
+impl BoardMethod for BoardState {
+    fn board(&self) -> &HashMap<u8, Box<dyn PieceMaker>> {
+        &self.board
+    }
+
+    fn board_mut(&mut self) -> &mut HashMap<u8, Box<dyn PieceMaker>> {
+        &mut self.board
+    }
 }
 
 impl BoardState {
@@ -74,31 +64,25 @@ impl BoardState {
     pub fn reset(&mut self) {
         self.board.clear();
 
-        self.board.insert(0, Piece::new(PieceType::Rook, false));
-        self.board.insert(1, Piece::new(PieceType::Knight, false));
-        self.board.insert(2, Piece::new(PieceType::Bishop, false));
-        self.board.insert(3, Piece::new(PieceType::King, false));
-        self.board.insert(4, Piece::new(PieceType::Queen, false));
-        self.board.insert(5, Piece::new(PieceType::Bishop, false));
-        self.board.insert(6, Piece::new(PieceType::Knight, false));
-        self.board.insert(7, Piece::new(PieceType::Rook, false));
+        let back_rank: [fn(bool) -> Box<dyn PieceMaker>; 8] = [
+            Rook::boxed,
+            Knight::boxed,
+            Bishop::boxed,
+            King::boxed,
+            Queen::boxed,
+            Bishop::boxed,
+            Knight::boxed,
+            Rook::boxed,
+        ];
 
-        for i in 8..16 {
-            self.board.insert(i, Piece::new(PieceType::Pawn, false));
+        for (file, make) in back_rank.into_iter().enumerate() {
+            self.insert(file as u8, make(false));
+            self.insert(56 + file as u8, make(true));
         }
-
-        for i in 48..56 {
-            self.board.insert(i, Piece::new(PieceType::Pawn, true));
+        for file in 0u8..8 {
+            self.insert(8 + file, Pawn::boxed(false));
+            self.insert(48 + file, Pawn::boxed(true));
         }
-
-        self.board.insert(56, Piece::new(PieceType::Rook, true));
-        self.board.insert(57, Piece::new(PieceType::Knight, true));
-        self.board.insert(58, Piece::new(PieceType::Bishop, true));
-        self.board.insert(59, Piece::new(PieceType::King, true));
-        self.board.insert(60, Piece::new(PieceType::Queen, true));
-        self.board.insert(61, Piece::new(PieceType::Bishop, true));
-        self.board.insert(62, Piece::new(PieceType::Knight, true));
-        self.board.insert(63, Piece::new(PieceType::Rook, true));
     }
 
     pub fn draw_board(&self) {
@@ -108,403 +92,227 @@ impl BoardState {
         for y in 0u8..8 {
             print!("{} ", y);
             for x in 0u8..8 {
-                if let Some(icon) = self.board.get(&(x + (8 * y))) {
-                    print!("| {} ", icon.to_string());
-                } else {
-                    print!("|    ");
+                match self.get(&index(x, y)) {
+                    Some(piece) => print!("| {} ", piece),
+                    None => print!("|    "),
                 }
             }
             println!("|");
             println!("  -----------------------------------------");
         }
     }
-}
 
-impl BoardState {
-    // returns type of piece at (x,y) as a enumerated type of PieceType
-    pub fn piece_type_at(&self, x: u8, y: u8) -> PieceType {
-        return if let Some(piece) = self.board.get(&(x + (8 * y))) {
-            piece.piece_type()
-        } else {
-            PieceType::Empty
-        };
+    // returns true if no piece stands on (x, y)
+    pub fn is_empty(&self, x: u8, y: u8) -> bool {
+        self.get(&index(x, y)).is_none()
     }
 
     // returns the player (0 or 1) who owns the piece at (x, y) or -1 if no piece at (x, y)
     pub fn piece_player_at(&self, x: u8, y: u8) -> i8 {
-        if let Some(piece) = self.board.get(&(x + (8 * y))) {
-            if piece.player() { 1 } else { 0 }
-        } else {
-            return -1;
+        match self.get(&index(x, y)) {
+            Some(piece) if piece.player() => 1,
+            Some(_) => 0,
+            None => -1,
         }
+    }
+
+    /// Every square strictly between origin and destination is empty. Walks one
+    /// step at a time so it serves straight and diagonal lines alike, and so a
+    /// descending move is not silently skipped by an empty range.
+    pub fn path_is_clear(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        let (dx, dy) = (step(x, x2), step(y, y2));
+        let (mut cx, mut cy) = (x as i8 + dx, y as i8 + dy);
+        while (cx, cy) != (x2 as i8, y2 as i8) {
+            if !self.is_empty(cx as u8, cy as u8) {
+                return false;
+            }
+            cx += dx;
+            cy += dy;
+        }
+        true
+    }
+
+    /// The destination holds nothing, or an enemy piece.
+    pub fn can_land_on(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        self.piece_player_at(x2, y2) != self.piece_player_at(x, y)
     }
 
     // returns true if piece successfully moved from (x, y) to (x2, y2)
     pub fn move_piece(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if let Some(p) = self.board.get(&(x + (8 * y))) {
-            match p.piece_type() {
-                PieceType::Empty => false,
-                PieceType::Pawn => self.move_pawn(x, y, x2, y2),
-                PieceType::Rook => self.move_rook(x, y, x2, y2),
-                PieceType::Knight => self.move_knight(x, y, x2, y2),
-                PieceType::Bishop => self.move_bishop(x, y, x2, y2),
-                PieceType::King => self.move_king(x, y, x2, y2),
-                PieceType::Queen => self.move_queen(x, y, x2, y2),
-            }
-        } else {
-            false
-        };
-    }
-
-    fn move_pawn(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_pawn(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
+        if !self.is_valid_move(x, y, x2, y2) {
+            return false;
+        }
+        match self.remove(&index(x, y)) {
+            Some(piece) => {
+                self.remove(&index(x2, y2));
+                self.insert(index(x2, y2), piece);
                 true
-            } else {
-                false
             }
-        } else {
-            false
-        };
-    }
-
-    fn move_rook(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_rook(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-    }
-
-    fn move_knight(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_knight(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-    }
-
-    fn move_bishop(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_bishop(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-    }
-
-    fn move_king(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_king(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-    }
-
-    fn move_queen(&mut self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if self.is_valid_move_queen(x, y, x2, y2) {
-            if let Some(temp) = self.board.remove(&(x + (8 * y))) {
-                self.board.remove(&(x2 + (8 * y2)));
-                self.board.insert((x2 + (8 * y2)), temp);
-
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+            None => false,
+        }
     }
 
     pub fn is_valid_move(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        return if let Some(p) = self.board.get(&(x + (8 * y))) {
-            match p.piece_type() {
-                PieceType::Empty => false,
-                PieceType::Pawn => self.is_valid_move_pawn(x, y, x2, y2),
-                PieceType::Rook => self.is_valid_move_rook(x, y, x2, y2),
-                PieceType::Knight => self.is_valid_move_knight(x, y, x2, y2),
-                PieceType::Bishop => self.is_valid_move_bishop(x, y, x2, y2),
-                PieceType::King => self.is_valid_move_king(x, y, x2, y2),
-                PieceType::Queen => self.is_valid_move_queen(x, y, x2, y2),
-            }
-        } else {
-            false
-        };
-    }
-
-    fn is_valid_move_pawn(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        // can move forward 1 or 2 if at starting location and NOT blocked by piece
-        // can move diagonally forward 1 ONLY IF blocked by piece of enemy player
-
-        if let Some(p) = self.board.get(&(x + (8 * y))) {
-            if x2 < 0 || x2 > 7 || y2 < 0 || y2 > 7 {
-                return false;
-            } // if movement outside of board bounds
-
-            if p.player() == false
-            // player 0
-            {
-                // if move forward
-                if x == x2 {
-                    // if moving forward 1 piece
-                    if y2 == y + 1 {
-                        return self.piece_type_at(x, y + 1) == PieceType::Empty;
-                    }
-                    // if moving forward 2 piece
-                    else if y2 == y + 2 && y == 1 {
-                        self.piece_type_at(x, y + 1) == PieceType::Empty
-                            && self.piece_type_at(x, y + 2) == PieceType::Empty
-                    }
-                    // if not moving forward 1 or 2 spaces
-                    else {
-                        false
-                    }
-                }
-                // if attacking diagonally
-                else if abs_dif(x, x2) == 1 && y + 1 == y2 {
-                    return self.piece_player_at(x2, y2) == 1;
-                } else {
-                    false
-                }
-            } else
-            // player 1
-            {
-                // if move forward
-                if x == x2 {
-                    // if moving forward 1 piece
-                    if y2 == y - 1 {
-                        self.piece_type_at(x, y - 1) == PieceType::Empty
-                    }
-                    // if moving forward 2 piece
-                    else if y2 == y - 2 && y == 6 {
-                        self.piece_type_at(x, y - 1) == PieceType::Empty
-                            && self.piece_type_at(x, y - 2) == PieceType::Empty
-                    }
-                    // if not moving forward 1 or 2 spaces
-                    else {
-                        false
-                    }
-                }
-                // if attacking diagonally
-                else if abs_dif(x, x2) == 1 && y - 1 == y2 {
-                    return self.piece_player_at(x2, y2) == 1;
-                } else {
-                    false
-                }
-            }
-        } else {
-            false
+        match self.get(&index(x, y)) {
+            Some(piece) => piece.validate(self, x, y, x2, y2),
+            None => false,
         }
-    }
-
-    fn is_valid_move_rook(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        // can move 4 ways, optionally move into piece owned by enemy player
-
-        if x2 < 0 || x2 > 7 || y2 < 0 || y2 > 7 {
-            return false;
-        } // if movement outside of board bounds
-
-        return if x == x2
-        // if vertically aligned
-        {
-            for i in y + 1..y2 {
-                // if non-empty space encountered before destination, then invalid move
-                if self.piece_type_at(x, i) != PieceType::Empty {
-                    return false;
-                }
-            }
-
-            // if path to destination is empty AND destination is empty OR enemy, then move is valid
-            if self.piece_player_at(x2, y2) != self.piece_player_at(x, y) {
-                true
-            } else {
-                false
-            }
-        } else if y == y2
-        // if horizontally aligned
-        {
-            for i in x + 1..x2 {
-                // if non-empty space encountered before destination, then invalid move
-                if self.piece_type_at(y, i) != PieceType::Empty {
-                    return false;
-                }
-            }
-
-            // if path to destination is empty AND destination is empty OR enemy, then move is valid
-            return if self.piece_player_at(x2, y2) != self.piece_player_at(x, y) {
-                true
-            } else {
-                false
-            };
-        } else {
-            false
-        }; // if not aligned, false
-
-        // if x = x2 then moving along y axis
-        //      all spaces from between y and y2 are empty, and (x2, y2) is empty or enemy
-        //          true
-        //      else
-        //          false
-        // if y = y2 then moving along x axis
-        //      all spaces from between x and x2 are empty, and (x2, y2) is empty or enemy
-        //          true
-        //      else
-        //          false
-        // if does not align with x or y axis, invalid
-    }
-
-    fn is_valid_move_knight(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        if x2 < 0 || x2 > 7 || y2 < 0 || y2 > 7 {
-            return false;
-        } // if movement outside of board bounds
-
-        // can move in L pattern in any direction, jumping over pieces, can only take enemy player piece
-
-        // if L pattern away
-        return if (abs_dif(x, x2) == 1 && abs_dif(y, y2) == 2)
-            || (abs_dif(x, x2) == 2 && abs_dif(y, y2) == 1)
-        {
-            if self.piece_player_at(x2, y2) != self.piece_player_at(x, y) {
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        // if (x2, y2) is L jump away, and destination is empty or enemy
-        //      true
-        // else
-        //      false
-    }
-
-    fn is_valid_move_bishop(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        if x2 < 0 || x2 > 7 || y2 < 0 || y2 > 7 {
-            return false;
-        }
-        // if movement outside of board bounds
-        else if x == x2 && y == y2 {
-            return false;
-        } // if destination == origin
-
-        if abs_dif(x, x2) == abs_dif(y, y2) {
-            // if every space between origin and destination is empty
-
-            let mut temp_x: Range<u8>;
-            let mut temp_y: Range<u8>;
-
-            if x2 < x {
-                temp_x = (x - 1)..x2;
-            } else {
-                temp_x = (x + 1)..x2;
-            }
-
-            if y2 < y {
-                temp_y = (y - 1)..y2;
-            } else {
-                temp_y = (y + 1)..y2;
-            }
-
-            for (X, Y) in temp_x.zip(temp_y)
-            // check every square between origin and destination
-            {
-                if self.piece_type_at(X, Y) != PieceType::Empty {
-                    return false;
-                }
-            }
-
-            return if self.piece_player_at(x2, y2) != self.piece_player_at(x, y) {
-                true
-            } else {
-                false
-            };
-
-            // AND if destination is empty or enemy
-        }
-
-        // can move 4 ways diagonally, until contact with piece is made, can only take enemy player piece
-
-        false
-    }
-
-    fn is_valid_move_king(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        // can move 8 ways, one space, can only take enemy player piece
-
-        if x2 < 0 || x2 > 7 || y2 < 0 || y2 > 7 {
-            return false;
-        } // if movement outside of board bounds
-
-        return if abs_dif(x, x2) <= 1 && abs_dif(y, y2) <= 1
-        // if within 1 square
-        {
-            if self.piece_player_at(x2, y2) != self.piece_player_at(x, y)
-            // if destination is empty or enemy piece
-            {
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        // if (x2, y2) is within 1 square, and is empty or enemy
-        //      true
-        // else
-        //      false
-    }
-
-    fn is_valid_move_queen(&self, x: u8, y: u8, x2: u8, y2: u8) -> bool {
-        // can move 8 ways, until contact is made, can only take enemy player piece
-
-        return if self.is_valid_move_bishop(x, y, x2, y2) || self.is_valid_move_rook(x, y, x2, y2) {
-            true
-        } else {
-            false
-        };
-
-        // if (x2, y2) is along horizontal/vertical
-        //      reuse Rook logic
-        // if (x2, y2) is along diagonal
-        //      reuse bishop logic
-        // else
-        //      false
     }
 }
 
-fn abs_dif(x: u8, y: u8) -> u8 {
-    return (x as i16 - y as i16).abs() as u8;
+impl Default for BoardState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The board is passed in rather than held: a piece lives inside the board, so
+/// owning a handle back to it would be a cycle, and a `&mut` one would alias
+/// the map the piece was looked up from.
+pub trait PieceMaker: fmt::Display {
+    fn player(&self) -> bool;
+
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool;
+}
+
+/// Same body for all six kinds: a piece differs only in `validate`.
+macro_rules! piece {
+    ($name:ident, $player_0:literal, $player_1:literal) => {
+        pub struct $name {
+            player: bool,
+        }
+
+        impl $name {
+            fn new(player: bool) -> Self {
+                $name { player }
+            }
+
+            fn boxed(player: bool) -> Box<dyn PieceMaker> {
+                Box::new($name::new(player))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if self.player {
+                    write!(f, $player_1)
+                } else {
+                    write!(f, $player_0)
+                }
+            }
+        }
+    };
+}
+
+piece!(King, "1K", "2K");
+piece!(Queen, "1Q", "2Q");
+piece!(Rook, "1R", "2R");
+piece!(Knight, "1N", "2N");
+piece!(Bishop, "1B", "2B");
+piece!(Pawn, "1P", "2P");
+
+impl PieceMaker for King {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    // can move 8 ways, one space, can only take enemy player piece
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        if !in_bounds(x2, y2) || (x == x2 && y == y2) {
+            return false;
+        }
+        abs_dif(x, x2) <= 1 && abs_dif(y, y2) <= 1 && board.can_land_on(x, y, x2, y2)
+    }
+}
+
+impl PieceMaker for Rook {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    // can move 4 ways, optionally move into piece owned by enemy player
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        if !in_bounds(x2, y2) || (x == x2 && y == y2) {
+            return false;
+        }
+        if x != x2 && y != y2 {
+            return false; // if not aligned, false
+        }
+        board.path_is_clear(x, y, x2, y2) && board.can_land_on(x, y, x2, y2)
+    }
+}
+
+impl PieceMaker for Bishop {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    // can move 4 ways diagonally, until contact with piece is made, can only take enemy player piece
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        if !in_bounds(x2, y2) || (x == x2 && y == y2) {
+            return false;
+        }
+        if abs_dif(x, x2) != abs_dif(y, y2) {
+            return false;
+        }
+        board.path_is_clear(x, y, x2, y2) && board.can_land_on(x, y, x2, y2)
+    }
+}
+
+impl PieceMaker for Knight {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    // can move in L pattern in any direction, jumping over pieces, can only take enemy player piece
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        if !in_bounds(x2, y2) {
+            return false;
+        }
+        let l_shaped = (abs_dif(x, x2) == 1 && abs_dif(y, y2) == 2)
+            || (abs_dif(x, x2) == 2 && abs_dif(y, y2) == 1);
+        l_shaped && board.can_land_on(x, y, x2, y2)
+    }
+}
+
+impl PieceMaker for Queen {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        Rook::new(self.player).validate(board, x, y, x2, y2)
+            || Bishop::new(self.player).validate(board, x, y, x2, y2)
+    }
+}
+
+impl PieceMaker for Pawn {
+    fn player(&self) -> bool {
+        self.player
+    }
+
+    // can move forward 1 or 2 if at starting location and NOT blocked by piece
+    // can move diagonally forward 1 ONLY IF blocked by piece of enemy player
+    fn validate(&self, board: &BoardState, x: u8, y: u8, x2: u8, y2: u8) -> bool {
+        if !in_bounds(x2, y2) {
+            return false;
+        }
+        // player 0 starts on rank 1 and advances up the board; player 1 mirrors it.
+        let (forward, start_rank, enemy) = if self.player { (-1, 6, 0) } else { (1, 1, 1) };
+        let advance = y2 as i8 - y as i8;
+
+        if x == x2 {
+            if advance == forward {
+                return board.is_empty(x2, y2);
+            }
+            return advance == 2 * forward
+                && y == start_rank
+                && board.path_is_clear(x, y, x2, y2)
+                && board.is_empty(x2, y2);
+        }
+        // if attacking diagonally
+        abs_dif(x, x2) == 1 && advance == forward && board.piece_player_at(x2, y2) == enemy
+    }
 }
 
 fn main() {
@@ -523,21 +331,13 @@ fn main() {
     loop {
         println!(":");
         let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read line"); // read input
-
-        loop {
-            if input.ends_with('\n') || input.ends_with('\r') || input.ends_with(' ') {
-                input.pop();
-            } else {
-                break;
-            }
+        if io::stdin().read_line(&mut input).unwrap_or(0) == 0 {
+            return; // end of input
         }
 
-        let vector: Vec<&str> = input.split(' ').collect();
+        let vector: Vec<&str> = input.split_whitespace().collect();
 
-        match vector.get(0) {
+        match vector.first() {
             Some(&"move") => {
                 call_move(&mut board, &vector);
             }
@@ -564,74 +364,175 @@ fn main() {
             }
         }
     }
-
-    return;
 }
 
-fn call_move(bs: &mut BoardState, s: &Vec<&str>) -> bool {
-    if s.len() != 5 {
-        for i in s {
-            println!("{}", i);
+/// The four coordinates following the command word, or `None` on bad input.
+fn parse_coordinates(s: &[&str], usage: &str) -> Option<[u8; 4]> {
+    let mut array: [u8; 4] = [0; 4];
+    for i in 1..5 {
+        match s.get(i).and_then(|slice| slice.parse::<u8>().ok()) {
+            Some(value) => array[i - 1] = value,
+            None => {
+                println!("usage: {usage}");
+                return None;
+            }
         }
     }
+    Some(array)
+}
 
-    let mut array: [u8; 4] = [0; 4];
+fn call_move(bs: &mut BoardState, s: &[&str]) -> bool {
+    let Some(a) = parse_coordinates(
+        s,
+        "move <origin X> <origin Y> <destination X> <destination Y>",
+    ) else {
+        return false;
+    };
 
-    for i in 1..5 {
-        if let Some(slice) = s.get(i) {
-            if let Ok(val) = slice.parse::<u8>() {
-                array[i - 1] = val;
-            } else {
-                println!("usage: move <origin X> <origin Y> <destination X> <destination Y>");
-                return false;
-            }
-        } else {
-            println!("usage: move <origin X> <origin Y> <destination X> <destination Y>");
-            return false;
-        } // if failed to parse term, return false
-    }
-
-    return if bs.move_piece(array[0], array[1], array[2], array[3]) {
+    if bs.move_piece(a[0], a[1], a[2], a[3]) {
         println!("successfully moved");
+        bs.draw_board();
         true
     } else {
         println!("invalid move");
         false
-    };
+    }
 }
 
-fn call_valid_move(bs: &mut BoardState, s: &Vec<&str>) -> bool {
-    if s.len() != 5 {
-        for i in s {
-            println!("{}", i);
-        }
-    }
+fn call_valid_move(bs: &mut BoardState, s: &[&str]) -> bool {
+    let Some(a) = parse_coordinates(
+        s,
+        "is_valid_move <origin X> <origin Y> <destination X> <destination Y>",
+    ) else {
+        return false;
+    };
 
-    let mut array: [u8; 4] = [0; 4];
-
-    for i in 1..5 {
-        if let Some(slice) = s.get(i) {
-            if let Ok(val) = slice.parse::<u8>()
-            // parse str to u8
-            {
-                array[i - 1] = val;
-            } else {
-                println!(
-                    "usage: is_valid_move <origin X> <origin Y> <destination X> <destination Y>"
-                );
-                return false;
-            }
-        } else {
-            println!("usage: is_valid_move <origin X> <origin Y> <destination X> <destination Y>");
-            return false;
-        }
-    }
-
-    return if bs.is_valid_move(array[0], array[1], array[2], array[3]) {
+    if bs.is_valid_move(a[0], a[1], a[2], a[3]) {
         println!("valid move");
         true
     } else {
         println!("invalid move");
         false
-    };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh() -> BoardState {
+        let mut board = BoardState::new();
+        board.reset();
+        board
+    }
+
+    #[test]
+    fn test_reset_layout() {
+        let board = fresh();
+        assert_eq!(board.board().len(), 32);
+        assert_eq!(board.piece_player_at(0, 0), 0);
+        assert_eq!(board.piece_player_at(0, 7), 1);
+        assert!(board.is_empty(0, 3));
+    }
+
+    #[test]
+    fn test_pawn_opening() {
+        let board = fresh();
+        assert!(board.is_valid_move(0, 1, 0, 2));
+        assert!(board.is_valid_move(0, 1, 0, 3), "two from the start rank");
+        assert!(!board.is_valid_move(0, 1, 0, 4));
+        assert!(!board.is_valid_move(0, 1, 1, 2), "no capture on empty");
+    }
+
+    #[test]
+    fn test_pawn_blocked() {
+        let mut board = fresh();
+        board.insert(index(0, 2), Pawn::boxed(true));
+        assert!(!board.is_valid_move(0, 1, 0, 2), "blocked head-on");
+        assert!(!board.is_valid_move(0, 1, 0, 3), "cannot jump the blocker");
+        assert!(board.is_valid_move(1, 1, 0, 2), "captures diagonally");
+    }
+
+    #[test]
+    fn test_rook_blocked() {
+        let mut board = fresh();
+        assert!(!board.is_valid_move(0, 0, 0, 3), "own pawn blocks");
+        board.remove(&index(0, 1));
+        assert!(board.is_valid_move(0, 0, 0, 3));
+        assert!(board.is_valid_move(0, 0, 0, 6), "captures enemy pawn");
+        assert!(!board.is_valid_move(0, 0, 0, 7), "stops at the capture");
+    }
+
+    #[test]
+    fn test_rook_descending() {
+        let mut board = fresh();
+        board.remove(&index(0, 6));
+        assert!(board.is_valid_move(0, 7, 0, 4), "downward path is checked");
+        assert!(
+            !board.is_valid_move(0, 7, 0, 0),
+            "blocked by the pawn on rank 1"
+        );
+    }
+
+    #[test]
+    fn test_knight_jumps() {
+        let board = fresh();
+        assert!(board.is_valid_move(1, 0, 0, 2), "jumps over its own rank");
+        assert!(board.is_valid_move(1, 0, 2, 2));
+        assert!(!board.is_valid_move(1, 0, 1, 2), "not an L");
+    }
+
+    #[test]
+    fn test_bishop_diagonal() {
+        let mut board = fresh();
+        assert!(!board.is_valid_move(2, 0, 4, 2), "own pawn blocks");
+        board.remove(&index(3, 1));
+        assert!(board.is_valid_move(2, 0, 4, 2));
+        assert!(board.is_valid_move(2, 0, 6, 4));
+    }
+
+    #[test]
+    fn test_queen_combines() {
+        let mut board = fresh();
+        board.remove(&index(4, 1));
+        assert!(board.is_valid_move(4, 0, 4, 4), "straight, like a rook");
+        board.remove(&index(3, 1));
+        assert!(board.is_valid_move(4, 0, 2, 2), "diagonal, like a bishop");
+        assert!(!board.is_valid_move(4, 0, 5, 3), "neither");
+    }
+
+    #[test]
+    fn test_king_one_square() {
+        let mut board = fresh();
+        board.remove(&index(3, 1));
+        assert!(board.is_valid_move(3, 0, 3, 1));
+        assert!(!board.is_valid_move(3, 0, 3, 2), "further than one square");
+        assert!(!board.is_valid_move(3, 0, 4, 0), "own queen");
+    }
+
+    #[test]
+    fn test_move_applies() {
+        let mut board = fresh();
+        assert!(board.move_piece(0, 1, 0, 3));
+        assert!(board.is_empty(0, 1));
+        assert_eq!(board.piece_player_at(0, 3), 0);
+        assert_eq!(board.board().len(), 32);
+    }
+
+    #[test]
+    fn test_capture_removes() {
+        let mut board = fresh();
+        board.remove(&index(0, 1)); // 31 left
+        assert!(board.move_piece(0, 0, 0, 6), "rook takes the enemy pawn");
+        assert_eq!(board.board().len(), 30);
+        assert_eq!(board.piece_player_at(0, 6), 0);
+    }
+
+    #[test]
+    fn test_rejected_move_keeps() {
+        let mut board = fresh();
+        assert!(!board.move_piece(0, 0, 0, 3), "blocked by its own pawn");
+        assert_eq!(board.piece_player_at(0, 0), 0);
+        assert_eq!(board.board().len(), 32);
+    }
 }

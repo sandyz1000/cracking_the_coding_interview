@@ -62,10 +62,21 @@ impl std::fmt::Display for AccountType {
 }
 
 #[derive(Debug)]
+struct PendingDeposit {
+    id: u64,
+    amount: i64, // cents
+    cleared: bool,
+}
+
+#[derive(Debug)]
 struct Account {
     account_number: u64,
-    balance: i64,          // cleared, spendable funds (cents)
-    pending_deposits: i64, // checks deposited but not yet cleared (cents)
+    balance: i64, // cleared, spendable funds (cents)
+    // Per-check ledger instead of a single number, so one check can clear
+    // independently of another. A bounced check is removed; a cleared one is
+    // kept with `cleared = true` for the audit trail.
+    pending_deposits: Vec<PendingDeposit>,
+    next_pending_id: u64,
     account_type: AccountType,
 }
 
@@ -74,7 +85,8 @@ impl Account {
         Self {
             account_number,
             balance: 0,
-            pending_deposits: 0,
+            pending_deposits: Vec::new(),
+            next_pending_id: 0,
             account_type,
         }
     }
@@ -88,27 +100,62 @@ impl Account {
         Ok(())
     }
 
+    /// Sum of the checks that have NOT yet cleared (i.e. still pending).
+    fn pending_total(&self) -> i64 {
+        self.pending_deposits
+            .iter()
+            .filter(|dep| !dep.cleared)
+            .map(|dep| dep.amount)
+            .sum()
+    }
+
+    fn find_pending(&self, id: u64) -> Option<usize> {
+        self.pending_deposits.iter().position(|dep| dep.id == id)
+    }
+
     /// A check is NOT spendable until it clears: it only lands in the
-    /// pending ledger. If the drawer's bank bounces it, the deposit is
-    /// simply cancelled and nothing was ever spendable.
-    fn deposit_check(&mut self, amount: i64) -> anyhow::Result<()> {
+    /// pending ledger under a stable id. If the drawer's bank bounces it,
+    /// `bounce_check` removes it and nothing was ever spendable.
+    fn deposit_check(&mut self, amount: i64) -> anyhow::Result<u64> {
         if amount < 0 {
             return Err(anyhow::anyhow!("cannot deposit a negative check"));
         }
-        self.pending_deposits += amount;
-        Ok(())
+        self.next_pending_id += 1;
+        let id = self.next_pending_id;
+        self.pending_deposits.push(PendingDeposit {
+            id,
+            amount,
+            cleared: false,
+        });
+        Ok(id)
     }
 
-    /// Move a cleared amount from pending into the spendable balance.
-    fn clear_pending(&mut self, amount: i64) -> anyhow::Result<()> {
-        if amount < 0 {
-            return Err(anyhow::anyhow!("cannot clear a negative amount"));
+    /// Settle ONE specific deposited check (by its stable id), moving it into
+    /// the spendable balance. Returns the amount now cleared.
+    fn clear_check(&mut self, id: u64) -> anyhow::Result<i64> {
+        let index = self
+            .find_pending(id)
+            .ok_or_else(|| anyhow::anyhow!("no pending check with id {id}"))?;
+        if self.pending_deposits[index].cleared {
+            return Err(anyhow::anyhow!("check {id} is already cleared"));
         }
-        if amount > self.pending_deposits {
-            return Err(anyhow::anyhow!("clearing more than the pending amount"));
+        let dep = &mut self.pending_deposits[index];
+        dep.cleared = true;
+        self.balance += dep.amount;
+        Ok(dep.amount)
+    }
+
+    /// Void a check that has not yet cleared; it never touches the balance.
+    fn bounce_check(&mut self, id: u64) -> anyhow::Result<()> {
+        let index = self
+            .find_pending(id)
+            .ok_or_else(|| anyhow::anyhow!("no pending check with id {id} to bounce"))?;
+        if self.pending_deposits[index].cleared {
+            return Err(anyhow::anyhow!(
+                "cannot bounce a check that already cleared"
+            ));
         }
-        self.pending_deposits -= amount;
-        self.balance += amount;
+        self.pending_deposits.remove(index);
         Ok(())
     }
 
@@ -257,10 +304,17 @@ impl ATM {
         }
     }
 
-    /// Simulate the clearinghouse releasing all pending checks on an account
-    /// (in reality this is a batch job driven by the clearing cycle, not the
-    /// customer). Returns the amount now spendable.
-    fn clear_checks(&mut self, customer_id: u64, account_id: u64) -> anyhow::Result<i64> {
+    /// Simulate the clearinghouse settling the checks it accepts for an
+    /// account (in reality this is a batch job driven by the clearing cycle,
+    /// not the customer). Each accepted check id is moved into the spendable
+    /// balance; the cleared total is returned. Bounced checks are handled
+    /// separately via `bounce_check`, or simply left pending.
+    fn clear_checks(
+        &mut self,
+        customer_id: u64,
+        account_id: u64,
+        accepted: &[u64],
+    ) -> anyhow::Result<i64> {
         let customer = self
             .customers
             .get_mut(&customer_id)
@@ -269,9 +323,24 @@ impl ATM {
             .accounts
             .get_mut(&account_id)
             .ok_or(anyhow::anyhow!("Account not found"))?;
-        let amount = account.pending_deposits;
-        account.clear_pending(amount)?;
-        Ok(amount)
+        let mut cleared_total = 0;
+        for &id in accepted {
+            cleared_total += account.clear_check(id)?;
+        }
+        Ok(cleared_total)
+    }
+
+    /// Void a check that has not yet cleared (the drawer's bank bounced it).
+    fn bounce_check(&mut self, customer_id: u64, account_id: u64, id: u64) -> anyhow::Result<()> {
+        let customer = self
+            .customers
+            .get_mut(&customer_id)
+            .ok_or(anyhow::anyhow!("Customer not found"))?;
+        let account = customer
+            .accounts
+            .get_mut(&account_id)
+            .ok_or(anyhow::anyhow!("Account not found"))?;
+        account.bounce_check(id)
     }
 
     fn perform_transaction(
@@ -435,8 +504,14 @@ impl ATMDriver {
             &mut guard,
             &bob_card,
             bob_checking,
-            TransactionType::DepositCheck(25_000),
-        ); // ₹250.00
+            TransactionType::DepositCheck(10_000),
+        ); // ₹100.00
+        run_op(
+            &mut guard,
+            &bob_card,
+            bob_checking,
+            TransactionType::DepositCheck(5_000),
+        ); // ₹50.00
         {
             let bob_account = guard
                 .customers
@@ -446,27 +521,54 @@ impl ATMDriver {
                 .get(&bob_checking)
                 .unwrap();
             println!(
-                "  Bob's Checking ({bob_checking}) after CHECK deposit → cleared {}, pending {}",
+                "  Bob's Checking ({bob_checking}) after CHECK deposits → cleared {}, pending {}",
                 fmt_money(bob_account.balance),
-                fmt_money(bob_account.pending_deposits)
+                fmt_money(bob_account.pending_total())
             );
         }
-        // The check has NOT cleared: Bob cannot spend it yet.
+        // Neither check has cleared: Bob cannot spend any of it yet.
         run_op(
             &mut guard,
             &bob_card,
             bob_checking,
             TransactionType::Withdraw(110_000),
         ); // ₹1,100.00 — more than cleared ₹1,000.00 → must fail
-        // Clearinghouse releases the pending check; only now is it spendable.
-        let cleared = guard.clear_checks(2, bob_checking).unwrap();
-        println!("  clearinghouse cleared {} → spendable", fmt_money(cleared));
+        // The clearinghouse settles the ₹100 check but bounces the ₹50 one.
+        let ids: Vec<u64> = guard
+            .customers
+            .get(&2)
+            .unwrap()
+            .accounts
+            .get(&bob_checking)
+            .unwrap()
+            .pending_deposits
+            .iter()
+            .map(|dep| dep.id)
+            .collect();
+        let first_check = ids[0];
+        let bounced_check = ids[1];
+        let cleared = guard.clear_checks(2, bob_checking, &[first_check]).unwrap();
+        guard.bounce_check(2, bob_checking, bounced_check).unwrap();
+        println!(
+            "  clearinghouse settled {} → spendable; bounced ₹50 check; remaining pending {}",
+            fmt_money(cleared),
+            fmt_money(
+                guard
+                    .customers
+                    .get(&2)
+                    .unwrap()
+                    .accounts
+                    .get(&bob_checking)
+                    .unwrap()
+                    .pending_total()
+            )
+        );
         run_op(
             &mut guard,
             &bob_card,
             bob_checking,
             TransactionType::Withdraw(110_000),
-        ); // now succeeds: ₹1,000 cleared + ₹250 cleared check
+        ); // now succeeds: ₹1,000 cleared + ₹100 cleared check
         println!("  cash reserve: {}", fmt_money(guard.dispenser.reserve()));
         drop(guard);
 
@@ -538,7 +640,7 @@ impl ATMDriver {
                     account.account_number,
                     account.account_type,
                     fmt_money(account.balance),
-                    fmt_money(account.pending_deposits)
+                    fmt_money(account.pending_total())
                 );
             }
         }
@@ -567,35 +669,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uncleared_check_is_not_spendable() {
+    fn uncleared_checks_are_not_spendable() {
         let mut account = Account::new(1, AccountType::Checking);
         account.credit(100_00).unwrap();
         account.deposit_check(50_00).unwrap();
+        assert_eq!(account.pending_total(), 50_00);
 
         // ₹100 cleared; the ₹50 check has not cleared.
         assert!(account.withdraw(100_00).is_ok());
         assert!(account.withdraw(50_00).is_err());
-        assert_eq!(account.pending_deposits, 50_00);
     }
 
     #[test]
     fn cleared_check_becomes_spendable() {
         let mut account = Account::new(1, AccountType::Checking);
-        account.deposit_check(50_00).unwrap();
+        let id = account.deposit_check(50_00).unwrap();
         assert!(account.withdraw(50_00).is_err()); // pending, not cleared
 
-        account.clear_pending(50_00).unwrap();
-        assert_eq!(account.pending_deposits, 0);
+        account.clear_check(id).unwrap();
+        assert_eq!(account.pending_total(), 0);
         assert_eq!(account.balance, 50_00);
         assert!(account.withdraw(50_00).is_ok()); // spendable now
     }
 
     #[test]
-    fn cannot_clear_more_than_pending() {
+    fn one_check_clears_independently_of_another() {
         let mut account = Account::new(1, AccountType::Checking);
-        account.deposit_check(10_00).unwrap();
-        assert!(account.clear_pending(20_00).is_err());
-        assert_eq!(account.pending_deposits, 10_00);
+        let big = account.deposit_check(100_00).unwrap();
+        let small = account.deposit_check(50_00).unwrap();
+
+        // Only the ₹100 check clears; the ₹50 stays pending, so it cannot be
+        // withdrawn on top of the cleared balance.
+        assert_eq!(account.clear_check(big).unwrap(), 100_00);
+        assert_eq!(account.balance, 100_00);
+        assert_eq!(account.pending_total(), 50_00);
+        assert!(account.withdraw(150_00).is_err()); // ₹50 still not spendable
+        assert!(account.withdraw(100_00).is_ok()); // cleared ₹100 is
+
+        // The ₹50 check bounces: removed entirely, current balance untouched.
+        account.bounce_check(small).unwrap();
+        assert_eq!(account.pending_total(), 0); // bounced: fully gone
+        assert_eq!(account.balance, 0); // bouncing never changed balance
+        assert!(account.withdraw(50_00).is_err()); // bounced amount never materialized
+    }
+
+    #[test]
+    fn idempotency_and_validation() {
+        let mut account = Account::new(1, AccountType::Checking);
+        let id = account.deposit_check(10_00).unwrap();
+
+        // Clearing twice is rejected; same amount must not be credited twice.
+        account.clear_check(id).unwrap();
+        assert!(account.clear_check(id).is_err());
+        assert_eq!(account.balance, 10_00);
+
+        // Bouncing an already-cleared check is rejected.
+        assert!(account.bounce_check(id).is_err());
+        // Unknown ids are rejected.
+        assert!(account.clear_check(999).is_err());
+        assert!(account.bounce_check(999).is_err());
     }
 
     #[test]
@@ -603,7 +735,6 @@ mod tests {
         let mut account = Account::new(1, AccountType::Checking);
         assert!(account.credit(-1).is_err());
         assert!(account.deposit_check(-1).is_err());
-        assert!(account.clear_pending(-1).is_err());
         assert!(account.withdraw(-1).is_err());
     }
 }

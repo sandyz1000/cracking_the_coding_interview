@@ -1,58 +1,22 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::domain::reservations::{ReservationBook, ReservationStatus};
-use crate::domain::vehicles::{VehicleRegistry, VehicleSnapshot};
+use crate::domain::vehicles::{VehicleRegistry, VehicleSnapshot, VehicleStatus};
 use crate::locks::rd;
 use crate::time::Date;
 
-type AvailabilityKey = (String, Date, Date);
-
-/// Read-optimised availability index. Instead of scanning every reservation
-/// per query, the index maps (barcode, start, end) to the reservations that
-/// are actively holding the car (Pending or Confirmed). Lookups are O(1);
-/// the index is rebuilt on every book/modify/cancel.
+/// Availability queries over the live reservation book. See DESIGN.md.
 pub struct CarSearch {
     vehicles: Arc<VehicleRegistry>,
     reservations: Arc<ReservationBook>,
-    index: RwLock<HashMap<AvailabilityKey, Vec<String>>>,
 }
 
 impl CarSearch {
     pub fn new(vehicles: Arc<VehicleRegistry>, reservations: Arc<ReservationBook>) -> Self {
-        let search = Self {
+        Self {
             vehicles,
             reservations,
-            index: RwLock::new(HashMap::new()),
-        };
-        search.rebuild_index();
-        search
-    }
-
-    pub fn rebuild_index(&self) {
-        let mut by_key: HashMap<AvailabilityKey, Vec<String>> = HashMap::new();
-        {
-            let reservations = rd(&self.reservations);
-            for reservation in reservations.values() {
-                if matches!(
-                    reservation.status,
-                    ReservationStatus::Pending | ReservationStatus::Confirmed
-                ) {
-                    by_key
-                        .entry((
-                            reservation.vehicle_barcode.clone(),
-                            reservation.start_date,
-                            reservation.end_date,
-                        ))
-                        .or_default()
-                        .push(reservation.reservation_number.clone());
-                }
-            }
         }
-        for numbers in by_key.values_mut() {
-            numbers.sort();
-        }
-        *self.index.write().unwrap_or_else(|p| p.into_inner()) = by_key;
     }
 
     /// A car is available in [start, end) when no Pending/Confirmed
@@ -70,9 +34,7 @@ impl CarSearch {
         })
     }
 
-    /// Search by make/model/year/price, restricted to the requested window.
-    /// A car must be physically rentable (Available status) AND have no
-    /// overlapping reservation.
+    /// A hit must be rentable now (Available) and free for the whole window.
     pub fn search(
         &self,
         make: Option<&str>,
@@ -86,7 +48,7 @@ impl CarSearch {
             let vehicles = rd(&self.vehicles);
             vehicles
                 .values()
-                .filter(|v| v.status() == crate::domain::vehicles::VehicleStatus::Available)
+                .filter(|v| v.status() == VehicleStatus::Available)
                 .filter(|v| make.is_none_or(|m| v.make == m))
                 .filter(|v| model.is_none_or(|m| v.model == m))
                 .filter(|v| year.is_none_or(|y| v.year == y))
@@ -108,6 +70,7 @@ impl CarSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::payments::PaymentMethod;
     use crate::domain::reservations::ReservationSpec;
     use crate::test_util;
 
@@ -115,7 +78,7 @@ mod tests {
     fn test_search_respects_availability() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         system
             .reservations
             .book(
@@ -127,7 +90,7 @@ mod tests {
                     pickup: "NYC",
                     dropoff: "NYC",
                 },
-                crate::domain::payments::PaymentMethod::CreditCard,
+                PaymentMethod::CreditCard,
             )
             .unwrap();
         // Booked window: the car must not appear.
@@ -154,10 +117,10 @@ mod tests {
     }
 
     #[test]
-    fn test_search_filters_by_criteria() {
+    fn test_search_filters() {
         let system = test_util::system();
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
-        let mut truck = test_util::vehicle(&system, "B-2");
+        system.add_vehicle(test_util::vehicle("B-1"));
+        let mut truck = test_util::vehicle("B-2");
         truck.make = "Ford".into();
         truck.model = "F-150".into();
         truck.price_per_day = 90_00;

@@ -42,11 +42,7 @@ impl Reservation {
 
 pub type ReservationBook = RwLock<HashMap<String, Reservation>>;
 
-/// The booking engine. Two-phase transactions (reserve → pay → commit) make
-/// double-booking impossible; settlement (charge/refund) never runs while a
-/// lock is held. See `DESIGN.md`.
-/// Bundled booking window input for `book`, keeping the call under the
-/// seven-argument limit.
+/// Booking window input for `book`.
 #[derive(Clone, Copy, Debug)]
 pub struct ReservationSpec {
     pub start: Date,
@@ -55,6 +51,7 @@ pub struct ReservationSpec {
     pub dropoff: &'static str,
 }
 
+/// The booking engine: reserve → pay → commit. See DESIGN.md.
 pub struct ReservationManager {
     next_reservation: AtomicU64,
     pub book: Arc<ReservationBook>,
@@ -90,20 +87,18 @@ impl ReservationManager {
         Ok(())
     }
 
-    /// True when a reservation on the car would collide with another
-    /// reservation in [start, end). `exclude` is the reservation being
-    /// moved; Pending blocks too, because a pending reservation is holding
-    /// the car while its payment is in flight.
-    fn conflicts(
-        &self,
+    /// Takes an already-locked book so callers can check and insert without
+    /// releasing the lock in between; `exclude` is the reservation being moved.
+    fn has_conflict(
+        book: &HashMap<String, Reservation>,
         vehicle_barcode: &str,
         start: Date,
         end: Date,
         exclude: Option<&str>,
     ) -> bool {
-        let reservations = rd(&self.book);
-        reservations.values().any(|r| {
+        book.values().any(|r| {
             r.vehicle_barcode == vehicle_barcode
+                // Pending blocks too: it is holding the car during settlement.
                 && matches!(
                     r.status,
                     ReservationStatus::Pending | ReservationStatus::Confirmed
@@ -114,12 +109,8 @@ impl ReservationManager {
         })
     }
 
-    /// Book a car and pay as one transaction:
-    ///   1. RESERVE: write the Pending reservation under the reservations
-    ///      lock (this is what makes double-booking impossible).
-    ///   2. PAY through the gateway outside the lock — gateway latency must
-    ///      not block other bookings.
-    ///   3. COMMIT (Confirmed) or roll back on payment failure.
+    /// Reserve under the book lock, pay outside it, then commit or roll back.
+    /// See DESIGN.md.
     pub fn book(
         &self,
         customer_id: u64,
@@ -139,34 +130,40 @@ impl ReservationManager {
                 vehicle.status()
             )));
         }
-        if self.conflicts(vehicle_barcode, spec.start, spec.end, None) {
-            return Err(CarError::VehicleNotAvailable(format!(
-                "vehicle {vehicle_barcode} is already reserved for those dates"
-            )));
-        }
-
-        let reservation_number = format!(
-            "R-{:05}",
-            self.next_reservation.fetch_add(1, Ordering::Relaxed) + 1
-        );
         let total = (vehicle.price_per_day as i64 * spec.end.nights_from(spec.start))
             .try_into()
             .map_err(|_| CarError::InvalidDates("reservation total overflow".into()))?;
 
-        let mut reservation = Reservation {
-            reservation_number: reservation_number.clone(),
-            creation_date: Date::new(2026, 1, 1),
-            status: ReservationStatus::Pending,
-            start_date: spec.start,
-            end_date: spec.end,
-            pickup_location: spec.pickup.to_string(),
-            return_location: spec.dropoff.to_string(),
-            customer_id,
-            vehicle_barcode: vehicle_barcode.to_string(),
-            total_price: total,
-            refunded: 0,
+        let mut reservation = {
+            // Conflict check and the Pending write share one write lock; split
+            // across two locks, two racing callers both see a free car.
+            let mut book = wr(&self.book);
+            if Self::has_conflict(&book, vehicle_barcode, spec.start, spec.end, None) {
+                return Err(CarError::VehicleNotAvailable(format!(
+                    "vehicle {vehicle_barcode} is already reserved for those dates"
+                )));
+            }
+            let reservation_number = format!(
+                "R-{:05}",
+                self.next_reservation.fetch_add(1, Ordering::Relaxed) + 1
+            );
+            let reservation = Reservation {
+                reservation_number: reservation_number.clone(),
+                creation_date: Date::new(2026, 1, 1),
+                status: ReservationStatus::Pending,
+                start_date: spec.start,
+                end_date: spec.end,
+                pickup_location: spec.pickup.to_string(),
+                return_location: spec.dropoff.to_string(),
+                customer_id,
+                vehicle_barcode: vehicle_barcode.to_string(),
+                total_price: total,
+                refunded: 0,
+            };
+            book.insert(reservation_number, reservation.clone());
+            reservation
         };
-        wr(&self.book).insert(reservation_number.clone(), reservation.clone());
+        let reservation_number = reservation.reservation_number.clone();
 
         match self.payments.process(&reservation_number, total, method) {
             Ok(payment) => {
@@ -259,11 +256,8 @@ impl ReservationManager {
         }
     }
 
-    /// Move a confirmed reservation to a new date range. The new range is
-    /// written as Pending first (so the car is held during settlement), the
-    /// price delta is settled outside the lock, and only then is the
-    /// reservation re-committed as Confirmed. On settlement failure the
-    /// original dates are restored.
+    /// Move a confirmed reservation to a new range, settling the price delta
+    /// outside the lock and restoring the original dates on failure.
     pub fn modify(
         &self,
         reservation_number: &str,
@@ -277,46 +271,52 @@ impl ReservationManager {
                 "end date must be after start date".into(),
             ));
         }
-        let (original, price_per_day) = {
-            let reservations = rd(&self.book);
-            let reservation = reservations
-                .get(reservation_number)
-                .ok_or_else(|| CarError::ReservationNotFound(reservation_number.into()))?
-                .clone();
-            Self::assert_access(acting_user, reservation.customer_id)?;
-            if reservation.status != ReservationStatus::Confirmed {
-                return Err(CarError::InvalidTransition(format!(
-                    "cannot modify a {:?} reservation",
-                    reservation.status
-                )));
-            }
-            let vehicle = self.vehicle(&reservation.vehicle_barcode)?;
-            (reservation, vehicle.price_per_day)
-        };
-
-        if self.conflicts(
-            &original.vehicle_barcode,
-            new_start,
-            new_end,
-            Some(reservation_number),
-        ) {
-            return Err(CarError::VehicleNotAvailable(
-                "new dates overlap another reservation".into(),
-            ));
-        }
-
+        // Priced before the book lock is taken, so the vehicle registry is
+        // never locked underneath it. A reservation's car never changes.
+        let barcode = rd(&self.book)
+            .get(reservation_number)
+            .ok_or_else(|| CarError::ReservationNotFound(reservation_number.into()))?
+            .vehicle_barcode
+            .clone();
+        let price_per_day = self.vehicle(&barcode)?.price_per_day;
         let new_total: u32 = (price_per_day as i64 * new_end.nights_from(new_start))
             .try_into()
             .map_err(|_| CarError::InvalidDates("reservation total overflow".into()))?;
-        let delta = new_total as i64 - original.total_price as i64;
 
-        // Hold the car while settlement is in flight.
-        let mut pending = original.clone();
-        pending.status = ReservationStatus::Pending;
-        pending.start_date = new_start;
-        pending.end_date = new_end;
-        pending.total_price = new_total;
-        wr(&self.book).insert(reservation_number.to_string(), pending.clone());
+        let (original, mut pending) = {
+            // As in `book`: check and hold the new window under one lock.
+            let mut book = wr(&self.book);
+            let original = book
+                .get(reservation_number)
+                .ok_or_else(|| CarError::ReservationNotFound(reservation_number.into()))?
+                .clone();
+            Self::assert_access(acting_user, original.customer_id)?;
+            if original.status != ReservationStatus::Confirmed {
+                return Err(CarError::InvalidTransition(format!(
+                    "cannot modify a {:?} reservation",
+                    original.status
+                )));
+            }
+            if Self::has_conflict(
+                &book,
+                &original.vehicle_barcode,
+                new_start,
+                new_end,
+                Some(reservation_number),
+            ) {
+                return Err(CarError::VehicleNotAvailable(
+                    "new dates overlap another reservation".into(),
+                ));
+            }
+            let mut pending = original.clone();
+            pending.status = ReservationStatus::Pending;
+            pending.start_date = new_start;
+            pending.end_date = new_end;
+            pending.total_price = new_total;
+            book.insert(reservation_number.to_string(), pending.clone());
+            (original, pending)
+        };
+        let delta = pending.total_price as i64 - original.total_price as i64;
 
         if delta > 0 {
             if let Err(err) = self
@@ -349,6 +349,7 @@ mod tests {
     use crate::domain::payments::PaymentStatus;
     use crate::locks::rd;
     use crate::test_util;
+    use std::sync::Barrier;
     use std::thread;
 
     fn d(y: i32, m: u32, day: u32) -> Date {
@@ -359,7 +360,7 @@ mod tests {
     fn test_booking_flow() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
 
         let (reservation, payment) = system
             .reservations
@@ -384,7 +385,7 @@ mod tests {
     fn test_overlap_rejected() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         let reservations = &system.reservations;
 
         reservations
@@ -450,43 +451,50 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_booking_race() {
-        let system = test_util::system();
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
-        let handles: Vec<_> = (0..16)
-            .map(|i| {
-                let system = system.clone();
-                thread::spawn(move || {
-                    system
-                        .reservations
-                        .book(
-                            i as u64 + 1,
-                            "B-1",
-                            ReservationSpec {
-                                start: d(2026, 5, 10),
-                                end: d(2026, 5, 13),
-                                pickup: "NYC",
-                                dropoff: "NYC",
-                            },
-                            PaymentMethod::CreditCard,
-                        )
-                        .is_ok()
+    fn test_concurrent_booking() {
+        // Rounds plus a start barrier: one unsynchronised round misses a
+        // check-then-insert race ~98% of the time.
+        for _ in 0..50 {
+            let system = test_util::system();
+            system.add_vehicle(test_util::vehicle("B-1"));
+            let gate = Arc::new(Barrier::new(8));
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let system = system.clone();
+                    let gate = gate.clone();
+                    thread::spawn(move || {
+                        gate.wait();
+                        system
+                            .reservations
+                            .book(
+                                i as u64 + 1,
+                                "B-1",
+                                ReservationSpec {
+                                    start: d(2026, 5, 10),
+                                    end: d(2026, 5, 13),
+                                    pickup: "NYC",
+                                    dropoff: "NYC",
+                                },
+                                PaymentMethod::CreditCard,
+                            )
+                            .is_ok()
+                    })
                 })
-            })
-            .collect();
-        let winners = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .filter(|ok| *ok)
-            .count();
-        assert_eq!(winners, 1, "exactly one concurrent booking must win");
+                .collect();
+            let winners = handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok())
+                .filter(|ok| *ok)
+                .count();
+            assert_eq!(winners, 1, "exactly one concurrent booking must win");
+        }
     }
 
     #[test]
-    fn test_cancel_refunds_and_frees() {
+    fn test_cancel_refunds() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         let reservations = &system.reservations;
 
         let (reservation, payment) = reservations
@@ -536,7 +544,7 @@ mod tests {
         let system = test_util::system();
         let owner = test_util::customer(&system, "Owner");
         let stranger = test_util::customer(&system, "Stranger");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         let reservations = &system.reservations;
 
         let (reservation, _) = reservations
@@ -567,10 +575,10 @@ mod tests {
     }
 
     #[test]
-    fn test_modify_rejects_overlap_but_not_self() {
+    fn test_modify_overlap() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         let reservations = &system.reservations;
 
         let (reservation, _) = reservations
@@ -630,7 +638,7 @@ mod tests {
     fn test_lifecycle() {
         let system = test_util::system();
         let user = test_util::customer(&system, "Alice");
-        system.add_vehicle(test_util::vehicle(&system, "B-1"));
+        system.add_vehicle(test_util::vehicle("B-1"));
         let reservations = &system.reservations;
 
         let (reservation, _) = reservations

@@ -1,5 +1,14 @@
 [workspace]
-members = ["autocomplete-rs", "flight_management", "machine-coding-problems", "car_rental"]
+members = [
+    "autocomplete-rs",
+    "flight_management",
+    "machine-coding-problems",
+    "car_rental",
+    "digital_wallet",
+    "facebook",
+    "logging_framework",
+    "lru_cache"
+]
 version = "0.1.0"
 authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
 edition = "2024"
@@ -19,7 +28,7 @@ pretty_assertions = "1.4.1"
 threadpool = "1.8.1"
 bit-vec = "0.10.1"
 num = "0.4.3"
-thiserror = "2.0.19"
+thiserror = "2.0.20"
 strum = "0.28.0"
 strum_macros = "0.28.0"
 chrono = "0.4.45"
@@ -30,7 +39,7 @@ error-chain = "0.12.4"
 colored = "3.1.1"
 log = "0.4.33"
 libc = "0.2.189"
-futures = "0.3.33"
+futures = "0.3.34"
 arrayvec = "0.7.8"
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
@@ -94,10 +103,6 @@ name = "chess_game"
 path = "./chess/main.rs"
 
 [[bin]]
-name = "lru"
-path = "./lru/main.rs"
-
-[[bin]]
 name = "movie_ticket_booking"
 path = "./movie_ticket_booking/main.rs"
 
@@ -132,3 +137,7 @@ path = "concert_booking/main.rs"
 [[bin]]
 name = "pub_sub"
 path = "pub_sub/main.rs"
+
+[[bin]]
+name = "ring_buffer"
+path = "ring_buffer/main.rs"

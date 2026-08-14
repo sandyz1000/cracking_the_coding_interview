@@ -161,7 +161,7 @@ impl Flight {
         wr(&self.crew).extend(crew);
     }
 
-    // copy all the passenger from old aircraft to new aircraft 
+    // copy all the passenger from old aircraft to new aircraft
     pub fn swap_aircraft(&self, aircraft: Arc<Aircraft>) -> AmsResult<()> {
         let new_layout = aircraft.default_layout();
         let mut seats = wr(&self.seats);

@@ -6,13 +6,12 @@ use crate::domain::accounts::{Address, Customer, User, UserRole};
 use crate::domain::payments::{PaymentGateway, PaymentProcessor};
 use crate::domain::reservations::{ReservationBook, ReservationManager, ReservationStatus};
 use crate::domain::search::CarSearch;
-use crate::domain::vehicles::{Vehicle, VehicleRegistry};
+use crate::domain::vehicles::{Vehicle, VehicleRegistry, VehicleSnapshot, VehicleStatus};
 use crate::error::{CarError, CarResult};
 use crate::locks::{rd, wr};
 
-/// Composition root. Every shared component is built here exactly once and
-/// handed out via `Arc` — Rust's answer to the Singleton pattern, minus
-/// process-global state.
+/// Composition root: every shared component is built once and handed out via
+/// `Arc`. See DESIGN.md.
 pub struct CarRentalSystem {
     pub vehicles: Arc<VehicleRegistry>,
     pub reservations: Arc<ReservationManager>,
@@ -81,7 +80,24 @@ impl CarRentalSystem {
 
     pub fn add_vehicle(&self, vehicle: Vehicle) {
         wr(&self.vehicles).insert(vehicle.barcode.clone(), Arc::new(vehicle));
-        self.search.rebuild_index();
+    }
+
+    /// Taking a car out of service is an ops action, so it is manager-only
+    /// like removal.
+    pub fn set_vehicle_status(
+        &self,
+        barcode: &str,
+        status: VehicleStatus,
+        acting_user: &User,
+    ) -> CarResult<()> {
+        if !acting_user.is_manager() {
+            return Err(CarError::PermissionDenied);
+        }
+        rd(&self.vehicles)
+            .get(barcode)
+            .ok_or_else(|| CarError::VehicleNotFound(barcode.to_string()))?
+            .set_status(status);
+        Ok(())
     }
 
     /// Only a manager may remove a vehicle, and only if it is not out on a
@@ -94,7 +110,7 @@ impl CarRentalSystem {
             .get(barcode)
             .cloned()
             .ok_or_else(|| CarError::VehicleNotFound(barcode.to_string()))?;
-        if vehicle.status() == crate::domain::vehicles::VehicleStatus::Loaned {
+        if vehicle.status() == VehicleStatus::Loaned {
             return Err(CarError::InvalidTransition(format!(
                 "vehicle {barcode} is currently loaned"
             )));
@@ -114,14 +130,10 @@ impl CarRentalSystem {
             }
         }
         wr(&self.vehicles).remove(barcode);
-        self.search.rebuild_index();
         Ok(())
     }
 
-    pub fn vehicle_snapshot(
-        &self,
-        barcode: &str,
-    ) -> Option<crate::domain::vehicles::VehicleSnapshot> {
+    pub fn vehicle_snapshot(&self, barcode: &str) -> Option<VehicleSnapshot> {
         rd(&self.vehicles).get(barcode).map(|v| v.snapshot())
     }
 }
@@ -135,7 +147,7 @@ mod tests {
         let system = crate::test_util::system();
         let customer = crate::test_util::customer(&system, "Alice");
         let manager = User::new(9, "Manager", UserRole::Manager);
-        let vehicle = crate::test_util::vehicle(&system, "B-1");
+        let vehicle = crate::test_util::vehicle("B-1");
         system.add_vehicle(vehicle);
 
         // Customers cannot remove vehicles; managers can.

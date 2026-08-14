@@ -13,11 +13,7 @@ pub enum VehicleStatus {
     Other,
 }
 
-/// A vehicle in the fleet. `price_per_day` (cents) is the basis for every
-/// reservation total. Interior mutability: a Vehicle is shared across search,
-/// reservation, and ops flows.
-/// Bundled constructor input for `Vehicle::new`, keeping the factory under
-/// the seven-argument limit (same pattern as `FlightSpec`).
+/// Constructor input for `Vehicle::new`.
 #[derive(Clone, Debug)]
 pub struct VehicleSpec {
     pub barcode: String,
@@ -31,6 +27,8 @@ pub struct VehicleSpec {
     pub price_per_day: u32,
 }
 
+/// `price_per_day` is in cents. `status` is interior-mutable because one
+/// Vehicle is shared across search, reservation, and ops flows.
 pub struct Vehicle {
     pub barcode: String,
     pub license_number: String,

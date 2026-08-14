@@ -5,7 +5,8 @@ use car_rental_system::domain::accounts::UserRole;
 use car_rental_system::domain::payments::PaymentStatus;
 use car_rental_system::time::Date;
 use car_rental_system::{
-    Address, CarError, CarRentalSystem, PaymentMethod, ReservationSpec, User, VehicleSpec,
+    Address, CarError, CarRentalSystem, PaymentMethod, ReservationSpec, User, Vehicle, VehicleSpec,
+    VehicleStatus,
 };
 
 fn payment_label(status: PaymentStatus) -> &'static str {
@@ -41,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("VT-1004", "Ford", "Mustang", 2020, 90_00),
     ];
     for (barcode, make, model, year, price) in fleet {
-        system.add_vehicle(car_rental_system::Vehicle::new(VehicleSpec {
+        system.add_vehicle(Vehicle::new(VehicleSpec {
             barcode: barcode.to_string(),
             license_number: format!("{barcode}-LIC"),
             stock_number: format!("STK-{barcode}"),
@@ -54,14 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }));
     }
 
-    // One car out of service: it must never appear in search results.
-    system
-        .vehicles
-        .write()
-        .map_err(|_| "vehicle lock poisoned")?
-        .get("VT-1003")
-        .ok_or("VT-1003 missing")?
-        .set_status(car_rental_system::VehicleStatus::BeingServiced);
+    // Out of service: it must never appear in search results.
+    system.set_vehicle_status("VT-1003", VehicleStatus::BeingServiced, &manager)?;
 
     println!("=== Fleet ===");
     for barcode in ["VT-1001", "VT-1002", "VT-1003", "VT-1004"] {
@@ -82,7 +77,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = Date::new(2026, 5, 10);
     let end = Date::new(2026, 5, 13);
 
-    // Search: all available Toyotas under ₹700/day for those dates.
     let hits = system
         .search
         .search(Some("Toyota"), None, None, Some(70_00), start, end);
@@ -97,11 +91,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Alice books the Camry (credit card).
     let alice = system.register_customer("Alice", "alice@example.com", "555-0100", "DL-001");
     let alice_user = system.user(alice.id).ok_or("alice user missing")?;
-    // Fleet maintenance: only a manager may remove a vehicle.
-    system.add_vehicle(car_rental_system::Vehicle::new(VehicleSpec {
+
+    // Only a manager may remove a vehicle.
+    system.add_vehicle(Vehicle::new(VehicleSpec {
         barcode: "VT-1099".to_string(),
         license_number: "VT-1099-LIC".to_string(),
         stock_number: "STK-1099".to_string(),
@@ -142,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         payment_label(payment.status)
     );
 
-    // Bob tries the same car for the same dates → must be rejected.
+    // Same car, same dates: must be rejected.
     let bob = system.register_customer("Bob", "bob@example.com", "555-0101", "DL-002");
     match system.reservations.book(
         bob.id,
@@ -161,7 +155,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         other => return Err(format!("expected VehicleNotAvailable, got {other:?}").into()),
     }
 
-    // Bob books the Corolla for a later week via PayPal.
     let (later_res, _) = system.reservations.book(
         bob.id,
         "VT-1002",
@@ -174,9 +167,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PaymentMethod::PayPal,
     )?;
 
-    // Full lifecycle on Bob's reservation: start, then complete.
     let bob_user = system.user(bob.id).ok_or("bob user missing")?;
-    // Staff may start the rental on the customer's behalf.
+    // Staff may act on the customer's behalf.
     system
         .reservations
         .start_rental(&later_res.reservation_number, &receptionist)?;
@@ -192,7 +184,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         later_res.reservation_number
     );
 
-    // Alice extends hers by two nights → extra charge.
     let extended_end = Date::new(2026, 5, 15);
     let delta = system.reservations.modify(
         &reservation.reservation_number,
@@ -208,7 +199,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         delta / 100
     );
 
-    // Alice cancels → refund, car free again.
     let refunded = system
         .reservations
         .cancel(&reservation.reservation_number, &alice_user)?;
@@ -228,7 +218,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // The receptionist manages bookings on behalf of customers.
     match system.reservations.book(
         bob.id,
         "VT-1004",
