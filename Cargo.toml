@@ -7,7 +7,8 @@ members = [
     "digital_wallet",
     "facebook",
     "logging_framework",
-    "lru_cache"
+    "lru_cache",
+    "omnichannel"
 ]
 version = "0.1.0"
 authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
@@ -51,7 +52,7 @@ serde = "1.0.229"
 
 
 [workspace.dependencies.uuid]
-version = "1.24.0"
+version = "1.24.1"
 features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
@@ -141,3 +142,7 @@ path = "pub_sub/main.rs"
 [[bin]]
 name = "ring_buffer"
 path = "ring_buffer/main.rs"
+
+[[bin]]
+name = "thread_pool"
+path = "thread_pool/main.rs"
