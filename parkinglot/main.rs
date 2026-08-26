@@ -48,12 +48,8 @@ enum VehicleType {
     BUS = 3,
 }
 
-trait VehicleInterface {
-    
-}
-
 // Vehicle struct for license plate, company name and their type
-#[derive(Clone, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Vehicle {
     license_plate: i32,
     company_name: String,
@@ -66,21 +62,6 @@ impl Vehicle {
     }
     fn get_type(&self) -> VehicleType {
         self.type_of_vehicle.clone()
-    }
-}
-
-impl PartialEq for Vehicle {
-    fn eq(&self, other: &Vehicle) -> bool {
-        if self.license_plate != other.license_plate {
-            return false;
-        }
-        if self.company_name != other.company_name {
-            return false;
-        }
-        if self.type_of_vehicle != other.type_of_vehicle {
-            return false;
-        }
-        true
     }
 }
 

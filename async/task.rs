@@ -187,7 +187,7 @@ pub async fn find_common_ancestor<R: AsyncRead>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::io::Cursor;
+    use futures::io::Cursor;
 
     fn create_random_block() -> Block {
         let mut buffer = [0u8; 56];

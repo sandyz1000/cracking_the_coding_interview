@@ -8,7 +8,7 @@ members = [
     "facebook",
     "logging_framework",
     "lru_cache",
-    "omnichannel"
+    "omnichannel",
 ]
 version = "0.1.0"
 authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
@@ -23,12 +23,6 @@ edition = "2024"
 crossbeam = "0.8.4"
 rayon = "1.12.0"
 rand = "0.10.2"
-assert_approx_eq = "1.1.0"
-paste = "1.0.15"
-pretty_assertions = "1.4.1"
-threadpool = "1.8.1"
-bit-vec = "0.10.1"
-num = "0.4.3"
 thiserror = "2.0.20"
 strum = "0.28.0"
 strum_macros = "0.28.0"
@@ -36,15 +30,9 @@ chrono = "0.4.45"
 reqwest = { version = "0.13.4", features = ["json"] }
 clap = "4.6.6"
 anyhow = "1.0.104"
-error-chain = "0.12.4"
 colored = "3.1.1"
-log = "0.4.33"
-libc = "0.2.189"
+log = "0.4.34"
 futures = "0.3.34"
-arrayvec = "0.7.8"
-quickcheck = "1.1.0"
-quickcheck_macros = "1.2.0"
-async-std = "1.13.1"
 tokio = { version = "1.53.1", features = ["full"] }
 pin-project = "1.1.13"
 tokio-stream = "0.1.19"
@@ -52,7 +40,7 @@ serde = "1.0.229"
 
 
 [workspace.dependencies.uuid]
-version = "1.24.1"
+version = "1.25.0"
 features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
@@ -146,3 +134,19 @@ path = "ring_buffer/main.rs"
 [[bin]]
 name = "thread_pool"
 path = "thread_pool/main.rs"
+
+[[bin]]
+name = "music_streaming"
+path = "music_streaming/main.rs"
+
+[[bin]]
+name = "task_management"
+path = "task_management/main.rs"
+
+[[bin]]
+name = "traffic_signal"
+path = "traffic_signal/main.rs"
+
+[[bin]]
+name = "ride_sharing"
+path = "ride-sharing/main.rs"

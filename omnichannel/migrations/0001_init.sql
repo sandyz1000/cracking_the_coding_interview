@@ -1,16 +1,10 @@
--- Booking table
+-- Aircraft table
 CREATE TABLE IF NOT EXISTS
-Booking(
+Aircraft(
     id INTEGER PRIMARY KEY,
-    transaction_id INTEGER,
-    flight_no VARCHAR(8),
-    passenger_id INTEGER,
-    seat TEXT,
-    amount BIGINT,
-    refund BIGINT,
-    status VARCHAR,
-    baggage TEXT,
-    booking_date DATETIME
+    tail_no VARCHAR(8),
+    total_seats INT,
+    model_no VARCHAR(16)
 );
 
 -- Flight table: source/destination/crew stored as JSON text; seats are
@@ -45,11 +39,17 @@ flight_seats(
     FOREIGN KEY (flight_id) REFERENCES Flight(id)
 );
 
--- Aircraft table
+-- Booking table
 CREATE TABLE IF NOT EXISTS
-Aircraft(
+Booking(
     id INTEGER PRIMARY KEY,
-    tail_no VARCHAR(8),
-    total_seats INT,
-    model_no VARCHAR(16)
+    transaction_id INTEGER,
+    flight_no VARCHAR(8),
+    passenger_id INTEGER,
+    seat TEXT,
+    amount BIGINT,
+    refund BIGINT,
+    status VARCHAR,
+    baggage TEXT,
+    booking_date DATETIME
 );

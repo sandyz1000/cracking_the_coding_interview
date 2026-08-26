@@ -477,6 +477,10 @@ pub struct MovieTicketBookingSystem {
     movies: RwLock<HashMap<String, Movie>>,
     theaters: RwLock<HashMap<String, Theater>>,
     shows: RwLock<HashMap<uuid::Uuid, Arc<Show>>>,
+    /// Index over (movie, theater, date) -> show ids, for O(1) exact search.
+    /// Updated incrementally in `add_show`; browsing by movie alone still
+    /// scans `shows` since that's a different, smaller query shape.
+    show_index: RwLock<HashMap<(String, String, chrono::NaiveDate), Vec<uuid::Uuid>>>,
     bookings: RwLock<HashMap<uuid::Uuid, Arc<RwLock<Booking>>>>,
     pub payments: Arc<PaymentProcessor>,
 }
@@ -487,6 +491,7 @@ impl MovieTicketBookingSystem {
             movies: RwLock::new(HashMap::new()),
             theaters: RwLock::new(HashMap::new()),
             shows: RwLock::new(HashMap::new()),
+            show_index: RwLock::new(HashMap::new()),
             bookings: RwLock::new(HashMap::new()),
             payments: Arc::new(PaymentProcessor::new(gateway)),
         }
@@ -569,6 +574,10 @@ impl MovieTicketBookingSystem {
         }
         let show = Arc::new(Show::new(movie_title, theater_name, start_time, seats));
         write_guard(&self.shows).insert(show.id, Arc::clone(&show));
+        write_guard(&self.show_index)
+            .entry((movie_title.to_string(), theater_name.to_string(), start_time.date()))
+            .or_default()
+            .push(show.id);
         Ok(show)
     }
 
@@ -590,6 +599,23 @@ impl MovieTicketBookingSystem {
             .filter(|show| show.movie_title == movie_title)
             .cloned()
             .collect()
+    }
+
+    /// Exact search by movie, theater, and date - the system's #1 requirement.
+    /// O(1) index lookup instead of scanning every show.
+    pub fn search_shows(
+        &self,
+        movie_title: &str,
+        theater_name: &str,
+        date: chrono::NaiveDate,
+    ) -> Vec<Arc<Show>> {
+        let key = (movie_title.to_string(), theater_name.to_string(), date);
+        let ids = read_guard(&self.show_index)
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+        let shows = read_guard(&self.shows);
+        ids.iter().filter_map(|id| shows.get(id).cloned()).collect()
     }
 
     /// Book seats and pay as one transaction:
@@ -934,6 +960,21 @@ mod tests {
 
     fn customer(name: &str) -> User {
         User::new(name, "customer@example.com")
+    }
+
+    #[test]
+    fn test_search_shows_index() {
+        let (sys, show) = seeded_show();
+        let hits = sys.search_shows("Interstellar", "PVR", show.start_time.date());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, show.id);
+
+        assert!(sys
+            .search_shows("Interstellar", "Wrong Theater", show.start_time.date())
+            .is_empty());
+        assert!(sys
+            .search_shows("Wrong Movie", "PVR", show.start_time.date())
+            .is_empty());
     }
 
     #[test]
