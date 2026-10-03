@@ -1,0 +1,180 @@
+[workspace]
+members = [
+    "autocomplete-rs",
+    "flight_management",
+    "machine-coding-problems",
+    "car_rental",
+    "digital_wallet",
+    "facebook",
+    "logging_framework",
+    "lru_cache",
+    "omnichannel",
+]
+version = "0.1.0"
+authors = ["Sandip Dey <sandip.dey1988@yahoo.com>"]
+edition = "2024"
+
+[package]
+name = "craking_coding_interview"
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+crossbeam = "0.8.4"
+rayon = "1.12.0"
+rand = "0.10.2"
+thiserror = "2.0.20"
+strum = "0.28.0"
+strum_macros = "0.28.0"
+chrono = "0.4.45"
+reqwest = { version = "0.13.4", features = ["json"] }
+clap = "4.6.6"
+anyhow = "1.0.104"
+colored = "3.1.1"
+log = "0.4.34"
+futures = "0.3.34"
+tokio = { version = "1.53.1", features = ["full"] }
+pin-project = "1.1.13"
+tokio-stream = "0.1.19"
+serde = "1.0.229"
+
+
+[workspace.dependencies.uuid]
+version = "1.25.0"
+features = [
+    "v4",                # Lets you generate random UUIDs
+    "fast-rng",          # Use a faster (but still sufficiently random) RNG
+    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+]
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+uuid = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+colored = { workspace = true }
+log = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "atm"
+path = "./atm/main.rs"
+
+[[bin]]
+name = "blackjack"
+path = "./blackjack/main.rs"
+
+[[bin]]
+name = "blackjack-design"
+path = "./blackjack/blackjack.rs"
+
+[[bin]]
+name = "chat"
+path = "./chat/main.rs"
+
+[[bin]]
+name = "parkinglot"
+path = "./parkinglot/parkinglot.rs"
+
+[[bin]]
+name = "chess"
+path = "./chess/chess.rs"
+
+[[bin]]
+name = "chess_game"
+path = "./chess/main.rs"
+
+[[bin]]
+name = "movie_ticket_booking"
+path = "./movie_ticket_booking/main.rs"
+
+[[bin]]
+name = "library_management"
+path = "./library_management/main.rs"
+
+[[bin]]
+name = "restaurant_management"
+path = "./restaurant_management/main.rs"
+
+[[bin]]
+name = "stock_exchange"
+path = "./stock_exchange/main.rs"
+
+[[bin]]
+name = "crawler"
+path = "./crawler/spider.rs"
+
+[[bin]]
+name = "blockchain"
+path = "./async/task.rs"
+
+[[bin]]
+name = "lock-free-ring-buffer"
+path = "./lock-free-ring-buffer/main.rs"
+
+[[bin]]
+name = "stream"
+path = "./async/stream.rs"
+
+[[bin]]
+name = "concert_booking"
+path = "concert_booking/main.rs"
+
+[[bin]]
+name = "pub_sub"
+path = "pub_sub/main.rs"
+
+[[bin]]
+name = "ring_buffer"
+path = "ring_buffer/main.rs"
+
+[[bin]]
+name = "thread_pool"
+path = "thread_pool/main.rs"
+
+[[bin]]
+name = "music_streaming"
+path = "music_streaming/main.rs"
+
+[[bin]]
+name = "task_management"
+path = "task_management/main.rs"
+
+[[bin]]
+name = "traffic_signal"
+path = "traffic_signal/main.rs"
+
+[[bin]]
+name = "ride_sharing"
+path = "ride-sharing/main.rs"
+
+[[bin]]
+name = "tokio-thread-pool"
+path = "tokio-thread-pool/main.rs"
+
+[[bin]]
+name = "multi-stream-window"
+path = "multi-stream-window/main.rs"
+
+[[bin]]
+name = "inmemory-lru-cache"
+path = "inmemory-lru-cache/main.rs"
+
+[[bin]]
+name = "rate-limiter"
+path = "rate-limiter/main.rs"
+
+[[bin]]
+name = "promo-pricing"
+path = "promo-pricing/main.rs"
+
+[[bin]]
+name = "cache-spacial-index"
+path = "cache-spacial-index/main.rs"
