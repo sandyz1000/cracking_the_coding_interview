@@ -570,12 +570,13 @@ impl GetById for Flight {
     fn get_by_id(pool: &SqlitePool, id: u32) -> PinFuture<anyhow::Result<Self::Output>> {
         let pool = pool.clone();
         Box::pin(async move {
-            let row = sqlx::query("SELECT * FROM Flight WHERE id = ?")
+            let mut flight: Flight = sqlx::query_as("SELECT * FROM Flight WHERE id = ?")
                 .bind(id)
                 .fetch_optional(&pool)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Flight {} not found", id))?;
-            Flight::from_row(&pool, row).await
+            flight.seats = Flight::load_seats(&pool, flight.id).await?;
+            Ok(flight)
         })
     }
 }
@@ -585,31 +586,33 @@ struct FlightReserved {
     total_amount: u64,
 }
 
-impl Flight {
-    // Source/destination/crew are stored as JSON TEXT columns and seats live
-    // in a separate `flight_seats` table, so a plain `#[derive(FromRow)]`
-    // can't decode a Flight in one shot; map the row by hand.
-    async fn from_row(pool: &SqlitePool, row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Flight> {
+impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Flight {
+    // Only the columns that live on this one row. `seats` lives in a
+    // separate `flight_seats` table — this trait method is sync with no
+    // `pool` to query it with, so it's left empty here; every caller below
+    // tops it up with `Flight::load_seats` right after the row decode.
+    fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         let source: String = row.try_get("source")?;
         let destination: String = row.try_get("destination")?;
         let crew: String = row.try_get("crew")?;
-        let id = row.try_get::<i64, _>("id")? as u32;
-        let seats = Self::load_seats(pool, id).await?;
+        let json_err = |e: serde_json::Error| sqlx::Error::Decode(Box::new(e));
         Ok(Flight {
-            id,
+            id: row.try_get::<i64, _>("id")? as u32,
             aircraft_id: row.try_get::<i64, _>("aircraft_id")? as u32,
             flight_no: row.try_get("flight_no")?,
-            source: serde_json::from_str(&source)?,
-            destination: serde_json::from_str(&destination)?,
+            source: serde_json::from_str(&source).map_err(json_err)?,
+            destination: serde_json::from_str(&destination).map_err(json_err)?,
             fare: row.try_get::<i64, _>("fare")? as u64,
             departure_time: row.try_get("departure_time")?,
             arrival_time: row.try_get("arrival_time")?,
             status: row.try_get("status")?,
-            seats,
-            crew: serde_json::from_str(&crew)?,
+            seats: HashMap::new(),
+            crew: serde_json::from_str(&crew).map_err(json_err)?,
         })
     }
+}
 
+impl Flight {
     async fn load_seats(
         pool: &SqlitePool,
         flight_id: u32,
@@ -666,12 +669,13 @@ impl Flight {
     }
 
     async fn get_by_number(pool: &SqlitePool, flight_no: &str) -> anyhow::Result<Flight> {
-        let row = sqlx::query("SELECT * FROM Flight WHERE flight_no = ?")
+        let mut flight: Flight = sqlx::query_as("SELECT * FROM Flight WHERE flight_no = ?")
             .bind(flight_no)
             .fetch_optional(pool)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Flight {} not found", flight_no))?;
-        Flight::from_row(pool, row).await
+        flight.seats = Flight::load_seats(pool, flight.id).await?;
+        Ok(flight)
     }
 
     fn available_seat(&self) -> anyhow::Result<usize> {
@@ -990,9 +994,10 @@ impl Indexer for FlightIndex {
     }
 
     async fn build(&mut self, pool: &SqlitePool) -> anyhow::Result<()> {
-        let rows = sqlx::query("SELECT * FROM Flight").fetch_all(pool).await?;
-        for row in rows {
-            self.upsert(Flight::from_row(pool, row).await?);
+        let flights: Vec<Flight> = sqlx::query_as("SELECT * FROM Flight").fetch_all(pool).await?;
+        for mut flight in flights {
+            flight.seats = Flight::load_seats(pool, flight.id).await?;
+            self.upsert(flight);
         }
         Ok(())
     }
@@ -1241,14 +1246,17 @@ fn internal_error<E: std::error::Error>(err: E) -> (StatusCode, String) {
 }
 
 async fn app() -> anyhow::Result<Router> {
-    //
     // Load .env if it's available, ignore if not.
     let _ = dotenvy::dotenv();
 
-    let db = SqlitePool::connect(&std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"))
-        .await?;
-    // let pool = Arc::new(&db);
-    sqlx::migrate!().run(&db).await?;
+    // Own db file per bin, not a shared one — migrations are scoped per bin
+    // too (./migrations/flight-booking), so a shared file would work but a
+    // shared *migrations directory* previously meant every bin's tables
+    // landed in the same schema. DATABASE_URL still overrides this.
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite://flight-booking.db?mode=rwc".to_string());
+    let db = SqlitePool::connect(&database_url).await?;
+    sqlx::migrate!("./migrations/flight-booking").run(&db).await?;
 
     // Seed the in-memory index directly (avoids circular db call).
     let mut indexer = FlightIndex::new();
@@ -1432,7 +1440,10 @@ mod tests {
             .connect_with(opts)
             .await
             .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        sqlx::migrate!("./migrations/flight-booking")
+            .run(&pool)
+            .await
+            .unwrap();
 
         sqlx::query(
             "INSERT INTO Aircraft (id, tail_no, total_seats, model_no) VALUES (1, 'VT-TEST', 6, 'Test')",

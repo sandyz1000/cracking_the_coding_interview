@@ -116,6 +116,10 @@ name = "blockchain"
 path = "./async/task.rs"
 
 [[bin]]
+name = "lock-free-ring-buffer"
+path = "./lock-free-ring-buffer/main.rs"
+
+[[bin]]
 name = "stream"
 path = "./async/stream.rs"
 
@@ -150,3 +154,27 @@ path = "traffic_signal/main.rs"
 [[bin]]
 name = "ride_sharing"
 path = "ride-sharing/main.rs"
+
+[[bin]]
+name = "tokio-thread-pool"
+path = "tokio-thread-pool/main.rs"
+
+[[bin]]
+name = "multi-stream-window"
+path = "multi-stream-window/main.rs"
+
+[[bin]]
+name = "inmemory-lru-cache"
+path = "inmemory-lru-cache/main.rs"
+
+[[bin]]
+name = "rate-limiter"
+path = "rate-limiter/main.rs"
+
+[[bin]]
+name = "promo-pricing"
+path = "promo-pricing/main.rs"
+
+[[bin]]
+name = "cache-spacial-index"
+path = "cache-spacial-index/main.rs"

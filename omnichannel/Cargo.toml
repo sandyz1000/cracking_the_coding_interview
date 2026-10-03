@@ -20,6 +20,9 @@ sqlx = { version = "0.9.0", features = [
 tower-http = { version = "0.7.0", features = ["cors"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
 [[bin]]
 name = "flight-booking"
 path = "src/flight-booking.rs"
